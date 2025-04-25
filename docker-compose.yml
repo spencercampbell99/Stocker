@@ -1,25 +1,52 @@
 version: '3.8'
 
 services:
-  python-app:
+  django-app:
     image: python:3.12-slim
-    container_name: python_app
+    container_name: django_app
     volumes:
-      - ./app:/app
+      - ./app/django:/app
+      - ./.env:/app/.env
     working_dir: /app
     env_file:
       - .env
     environment:
-      - VIRTUAL_ENV=/app/venv
-      - PATH=/app/venv/bin:$PATH
+      - VIRTUAL_ENV=/app/.venv
+      - PATH=/app/.venv/bin:$PATH
+    ports:
+      - "${DJANGO_LOCAL_PORT}:8000"
     command: >
-      bash -c "python -m venv venv &&
+      bash -c "apt-get update && apt-get install -y default-libmysqlclient-dev build-essential &&
+      python -m venv .venv &&
       . venv/bin/activate &&
       pip install --upgrade pip &&
       pip install -r requirements.txt &&
-      tail -f /dev/null"
+      python manage.py migrate &&
+      python manage.py runserver 0.0.0.0:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  modeling-dev:
+    image: python:3.12-slim
+    container_name: modeling_dev
+    volumes:
+      - ./app/modeling:/app
+    working_dir: /app
+    env_file:
+      - .env
+    # Don't automatically start with docker-compose up
+    profiles: ["dev"]
+    # Interactive mode for development
+    stdin_open: true
+    tty: true
+    command: bash
+    depends_on:
+      mysql:
+        condition: service_healthy
 
   mysql:
+    # Existing MySQL service configuration
     image: mysql:8.0
     container_name: mysql_db
     env_file:
@@ -34,11 +61,11 @@ services:
     ports:
       - "${MYSQL_LOCAL_PORT}:3306"
     volumes:
-      - mysql-data:/var/lib/mysql
+      - ./mysql-data:/var/lib/mysql
       - ./mysql-init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
+      timeout: 10s
       retries: 10
 
 volumes:

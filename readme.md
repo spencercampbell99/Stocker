@@ -5,5 +5,14 @@ This application is meant to store some historical data for SPY and to build a p
 Access mysql in docker
 `docker exec -it mysql_db mysql -uroot -p"password"`
 
-Access python in docker
-`docker exec -it python-app bash`
+Access modeling app python in docker
+`docker exec -it modeling_dev bash`
+
+Start modeling python app (dev only)
+`docker-compose run modeling-dev`
+
+## Modeling App Build
+Access modeling app via docker command
+`docker-compose run modeling-dev`
+
+Run command to build venv based on requirements.txt
