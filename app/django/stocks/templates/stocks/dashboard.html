@@ -1,0 +1,346 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Dashboard - {{ selected_ticker }}</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.0.0/dist/chart.umd.min.js"></script>
+    <!-- Chart.js adapter for date handling -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <!-- Lightweight and powerful candlestick extension -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.1.1/dist/chartjs-chart-financial.min.js"></script>
+    <style>
+        .chart-container {
+            height: 500px;
+            margin-bottom: 30px;
+        }
+        .timeframe-nav {
+            margin-bottom: 20px;
+        }
+        .timeframe-nav .nav-link.active {
+            background-color: #007bff;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid mt-4">
+        <h1 class="mb-4">Stock Dashboard</h1>
+        
+        <!-- Ticker Selection Form -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <form method="GET" action="{% url 'stock_dashboard' %}" class="d-flex">
+                    <div class="input-group">
+                        <label class="input-group-text" for="ticker">Ticker</label>
+                        <select class="form-select" id="ticker" name="ticker" required>
+                            <option value="">Select a ticker...</option>
+                            {% for ticker in tickers %}
+                                <option value="{{ ticker.symbol }}" {% if ticker.symbol == selected_ticker %}selected{% endif %}>
+                                    {{ ticker.symbol }} {% if ticker.name %}- {{ ticker.name }}{% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-primary">View Stock</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        {% if selected_ticker %}
+            <div class="row mb-3">
+                <div class="col">
+                    <h2>{{ selected_ticker }} Stock Data (Last Year)</h2>
+                </div>
+            </div>
+            
+            <!-- Timeframe Navigation Tabs -->
+            <ul class="nav nav-tabs timeframe-nav" id="timeframeTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="daily-tab" data-bs-toggle="tab" data-timeframe="daily" type="button" role="tab" aria-selected="true">Daily</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="hour-tab" data-bs-toggle="tab" data-timeframe="hour" type="button" role="tab" aria-selected="false">Hour</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="thirty-min-tab" data-bs-toggle="tab" data-timeframe="thirty_min" type="button" role="tab" aria-selected="false">30 Min</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="five-min-tab" data-bs-toggle="tab" data-timeframe="five_min" type="button" role="tab" aria-selected="false">5 Min</button>
+                </li>
+            </ul>
+            
+            <!-- Chart Display -->
+            <div class="row">
+                <div class="col">
+                    <div class="chart-container">
+                        <canvas id="stockChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Moving Average Legend -->
+            <div class="row">
+                <div class="col">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Moving Averages</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex gap-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="ma20Switch" checked>
+                                    <label class="form-check-label" for="ma20Switch">
+                                        <span style="color: #4bc0c0;">MA20</span>
+                                    </label>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="ma50Switch" checked>
+                                    <label class="form-check-label" for="ma50Switch">
+                                        <span style="color: #ff6384;">MA50</span>
+                                    </label>
+                                </div>
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="ma200Switch" checked>
+                                    <label class="form-check-label" for="ma200Switch">
+                                        <span style="color: #ffcd56;">MA200</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    {% if selected_ticker %}
+    <script>
+        // Register the financial chart components
+        Chart.register({
+            id: 'chartjs-chart-financial',
+            beforeInit: function(chart) {
+                console.log('Financial chart plugin registered');
+            }
+        });
+        
+        // Chart configuration and data fetching
+        let stockChart;
+        const ticker = '{{ selected_ticker }}';
+        let currentTimeframe = 'daily';  // Default timeframe
+        
+        // Function to format date based on timeframe
+        function formatDate(dateStr, timeframe) {
+            const date = new Date(dateStr);
+            if (timeframe === 'daily') {
+                return date.toLocaleDateString();
+            } else {
+                return date.toLocaleString();
+            }
+        }
+        
+        // Function to toggle visibility of moving averages
+        function toggleMovingAverage(period, visible) {
+            if (stockChart) {
+                const dataset = stockChart.data.datasets.find(d => d.label === `MA${period}`);
+                if (dataset) {
+                    dataset.hidden = !visible;
+                    stockChart.update();
+                }
+            }
+        }
+        
+        // Function to update chart with new data from API
+        async function updateChart(timeframe) {
+            try {
+                console.log(`Fetching data for ${ticker} with timeframe ${timeframe}`);
+                const response = await fetch(`/api/stock-data/?ticker=${ticker}&timeframe=${timeframe}`);
+                
+                if (!response.ok) {
+                    console.error(`API error: ${response.status}`);
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                console.log('Received data:', data);
+                
+                // Check if we have data
+                if (!data.candles || data.candles.length === 0) {
+                    console.warn('No candle data available');
+                    document.getElementById('stockChart').parentElement.innerHTML = 
+                        '<div class="alert alert-warning">No data available for this ticker and timeframe.</div>';
+                    return;
+                }
+                
+                // Format data for chart.js
+                const ohlcData = data.candles.map(candle => ({
+                    x: new Date(candle.timestamp),
+                    o: parseFloat(candle.open),
+                    h: parseFloat(candle.high),
+                    l: parseFloat(candle.low),
+                    c: parseFloat(candle.close)
+                }));
+                
+                console.log('Formatted OHLC data:', ohlcData);
+                
+                // Destroy previous chart if it exists
+                if (stockChart) {
+                    stockChart.destroy();
+                }
+                
+                // Create datasets array starting with candlestick data
+                const datasets = [
+                    {
+                        label: `${ticker} Price`,
+                        data: ohlcData,
+                        type: 'candlestick',
+                        color: {
+                            up: 'rgba(38, 166, 154, 1)',
+                            down: 'rgba(239, 83, 80, 1)',
+                            unchanged: 'rgba(156, 39, 176, 1)',
+                        }
+                    }
+                ];
+                
+                // Add moving average datasets
+                const maColors = {
+                    'MA20': 'rgb(75, 192, 192)',
+                    'MA50': 'rgb(255, 99, 132)',
+                    'MA200': 'rgb(255, 205, 86)'
+                };
+                
+                // Add moving averages if available
+                Object.entries(data.moving_averages).forEach(([key, values]) => {
+                    if (values && values.length > 0) {
+                        datasets.push({
+                            label: key,
+                            data: values.map((value, index) => value ? {
+                                x: new Date(data.candles[index].timestamp),
+                                y: value
+                            } : null).filter(item => item !== null),
+                            type: 'line',
+                            borderColor: maColors[key] || 'rgba(0, 0, 0, 0.5)',
+                            pointRadius: 0,
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1,
+                            hidden: document.getElementById(`${key.toLowerCase()}Switch`) ? !document.getElementById(`${key.toLowerCase()}Switch`).checked : false
+                        });
+                    }
+                });
+                
+                // Create the chart
+                const ctx = document.getElementById('stockChart').getContext('2d');
+                try {
+                    console.log('Creating chart with datasets:', datasets);
+                    stockChart = new Chart(ctx, {
+                        type: 'bar', // Default type that Chart.js recognizes
+                        data: {
+                            datasets: datasets
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                x: {
+                                    type: 'time',
+                                    time: {
+                                        unit: timeframe === 'daily' ? 'day' : 'hour'
+                                    }
+                                },
+                                y: {
+                                    beginAtZero: false
+                                }
+                            },
+                            plugins: {
+                                tooltip: {
+                                    mode: 'index',
+                                    intersect: false,
+                                    callbacks: {
+                                        label: function(context) {
+                                            const dataPoint = context.raw;
+                                            if (dataPoint && dataPoint.o !== undefined) {
+                                                return [
+                                                    `Open: ${dataPoint.o}`,
+                                                    `High: ${dataPoint.h}`,
+                                                    `Low: ${dataPoint.l}`,
+                                                    `Close: ${dataPoint.c}`
+                                                ];
+                                            } else if (dataPoint && dataPoint.y !== undefined) {
+                                                return context.dataset.label + ': ' + dataPoint.y;
+                                            } else {
+                                                return context.dataset.label;
+                                            }
+                                        }
+                                    }
+                                },
+                                legend: {
+                                    display: true,
+                                    position: 'top'
+                                },
+                                title: {
+                                    display: true,
+                                    text: `${ticker} - ${timeframe.replace('_', ' ').toUpperCase()} Chart`
+                                }
+                            }
+                        }
+                    });
+                    console.log('Chart created successfully:', stockChart);
+                } catch (chartError) {
+                    console.error('Error creating chart:', chartError);
+                    document.getElementById('stockChart').parentElement.innerHTML = 
+                        `<div class="alert alert-danger">Error creating chart: ${chartError.message}</div>`;
+                }
+                
+            } catch (error) {
+                console.error('Error fetching stock data:', error);
+            }
+        }
+        
+        // Initialize chart when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load initial chart data
+            updateChart(currentTimeframe);
+            
+            // Setup timeframe tab event handlers
+            document.querySelectorAll('[data-timeframe]').forEach(tab => {
+                tab.addEventListener('click', (event) => {
+                    // Update active tab
+                    document.querySelectorAll('[data-timeframe]').forEach(t => {
+                        t.classList.remove('active');
+                        t.setAttribute('aria-selected', 'false');
+                    });
+                    event.target.classList.add('active');
+                    event.target.setAttribute('aria-selected', 'true');
+                    
+                    // Update chart with new timeframe
+                    currentTimeframe = event.target.getAttribute('data-timeframe');
+                    updateChart(currentTimeframe);
+                });
+            });
+            
+            // Setup moving average toggle handlers
+            document.getElementById('ma20Switch')?.addEventListener('change', (e) => {
+                toggleMovingAverage(20, e.target.checked);
+            });
+            
+            document.getElementById('ma50Switch')?.addEventListener('change', (e) => {
+                toggleMovingAverage(50, e.target.checked);
+            });
+            
+            document.getElementById('ma200Switch')?.addEventListener('change', (e) => {
+                toggleMovingAverage(200, e.target.checked);
+            });
+        });
+    </script>
+    {% endif %}
+</body>
+</html>

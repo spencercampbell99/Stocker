@@ -1,34 +1,27 @@
-version: '3.8'
-
 services:
   django-app:
-    image: python:3.12-slim
+    build:
+      context: ./app/django
+      dockerfile: Dockerfile
     container_name: django_app
-    volumes:
-      - ./app/django:/app
-      - ./.env:/app/.env
-    working_dir: /app
     env_file:
       - .env
     environment:
-      - VIRTUAL_ENV=/app/.venv
-      - PATH=/app/.venv/bin:$PATH
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_ROOT_PASSWORD=${POSTGRES_ROOT_PASSWORD}
+      - DB_HOST=postgres
+      - APP_SECRET_KEY=${APP_SECRET_KEY}
+      - DEBUG_MODE=${DEBUG_MODE}
     ports:
       - "${DJANGO_LOCAL_PORT}:8000"
-    command: >
-      bash -c "apt-get update && apt-get install -y libpq-dev build-essential &&
-      python -m venv .venv &&
-      . .venv/bin/activate &&
-      pip install --upgrade pip &&
-      pip install -r requirements.txt &&
-      python manage.py migrate &&
-      python manage.py runserver 0.0.0.0:8000"
     depends_on:
       postgres:
         condition: service_healthy
+    restart: unless-stopped
 
   modeling-dev:
-    image: python:3.12-slim
+    image: python:3.11-slim
     container_name: modeling_dev
     volumes:
       - ./app/modeling:/app
@@ -61,7 +54,7 @@ services:
       - ./postgres-data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DATABASE}"]
       interval: 5s
       timeout: 5s
       retries: 10
