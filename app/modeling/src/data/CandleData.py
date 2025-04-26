@@ -11,13 +11,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import text
 import pandas as pd
 
+
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import Adjustment
 from alpaca.data.timeframe import TimeFrameUnit
 
-from src.models.AlpacaConnector import AlpacaConnector
-from src.models.database import StockSymbol, init_db, get_session, get_engine, DailyCandle, HourlyCandle, FiveMinuteCandle, ThirtyMinuteCandle
+from src.data.AlpacaConnector import AlpacaConnector
+from src.db.database import StockSymbol, init_db, get_session, get_engine, DailyCandle, HourlyCandle, FiveMinuteCandle, ThirtyMinuteCandle
+from datetime import timedelta
 
 
 class CandleDataManager:
@@ -92,6 +94,10 @@ class CandleDataManager:
             end = self._parse_date(end_date)
             end = end.replace(hour=23, minute=59, second=59)
             
+            # if end is after now, set to now - 20 minutes
+            if end > datetime.now(self.eastern_tz):
+                end = datetime.now(self.eastern_tz) - timedelta(minutes=20)
+            
             # Use the appropriate timeframe
             if timeframe not in self.TIMEFRAMES:
                 raise ValueError(f"Invalid timeframe: {timeframe}. Must be one of {list(self.TIMEFRAMES.keys())}")
@@ -117,6 +123,24 @@ class CandleDataManager:
             if df.empty:
                 print(f"No data found for {ticker} from {start_date} to {end_date}")
                 return df
+            
+            # Time adjust (accounting for daylight savings UTC->EST)
+            time_adjust = timedelta(hours=4) if self.eastern_tz.utcoffset(datetime.now()) == timedelta(hours=-4) else timedelta(hours=5)
+            
+            # Make sure timezone is set to Eastern Time for multi-index DataFrame
+            # For multi-index DataFrame, get the timestamp level and convert timezone
+            if isinstance(df.index, pd.MultiIndex):
+                # Get the timestamp level (second level) and convert timezone
+                timestamps = df.index.get_level_values(1).tz_convert(self.eastern_tz)
+                
+                # Adjust time back 4 hours and 1 timeframe (no idea why this is happening, seems to return in wrong tz)
+                timestamps = timestamps - time_adjust
+                
+                # Recreate the multi-index with the converted timestamps
+                df.index = pd.MultiIndex.from_arrays([df.index.get_level_values(0), timestamps])
+            else:
+                # For single-level index, convert directly
+                df.index = df.index.tz_convert(self.eastern_tz) - time_adjust
             
             # Filter by time of day if specified
             if start_time and end_time and timeframe != 'daily':

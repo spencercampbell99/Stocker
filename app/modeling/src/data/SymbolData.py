@@ -11,8 +11,8 @@ from alpaca.trading.requests import GetAssetsRequest
 from alpaca.trading.enums import AssetStatus
 
 from src.db.PostgresConnector import PostgresConnector
-from src.models.AlpacaConnector import AlpacaConnector
-from src.models.database import StockSymbol, init_db, get_session
+from src.data.AlpacaConnector import AlpacaConnector
+from src.db.database import StockSymbol, init_db, get_session
 
 
 class SymbolDataManager:

@@ -47,7 +47,7 @@ class BaseCandle(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     ticker = Column(String(20), nullable=False, index=True)
-    timestamp = Column(DateTime, nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=False), nullable=False, index=True)
     open = Column(Integer, nullable=False)
     high = Column(Integer, nullable=False)
     low = Column(Integer, nullable=False)

@@ -24,11 +24,15 @@ class RandomUUID(Func):
     function = 'gen_random_uuid'  # PostgreSQL 13+ function
     template = '%(function)s()'
     output_field = models.UUIDField()
+    
+class DateTimeWithoutTZField(models.DateTimeField):
+    def db_type(self, connection):
+        return 'timestamp'
 
 class BaseCandle(PostgresPartitionedModel):
     id=models.UUIDField(primary_key=True, editable=False, db_default=RandomUUID())
     ticker = models.CharField(max_length=10, db_index=True)
-    timestamp = models.DateTimeField()
+    timestamp = DateTimeWithoutTZField(db_index=True)
     open = models.DecimalField(max_digits=8, decimal_places=2)
     high = models.DecimalField(max_digits=8, decimal_places=2)
     low = models.DecimalField(max_digits=8, decimal_places=2)
