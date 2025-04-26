@@ -16,15 +16,15 @@ services:
     ports:
       - "${DJANGO_LOCAL_PORT}:8000"
     command: >
-      bash -c "apt-get update && apt-get install -y default-libmysqlclient-dev build-essential &&
+      bash -c "apt-get update && apt-get install -y libpq-dev build-essential &&
       python -m venv .venv &&
-      . venv/bin/activate &&
+      . .venv/bin/activate &&
       pip install --upgrade pip &&
       pip install -r requirements.txt &&
       python manage.py migrate &&
       python manage.py runserver 0.0.0.0:8000"
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
 
   modeling-dev:
@@ -32,6 +32,7 @@ services:
     container_name: modeling_dev
     volumes:
       - ./app/modeling:/app
+      - ./.env:/app/.env
     working_dir: /app
     env_file:
       - .env
@@ -42,31 +43,28 @@ services:
     tty: true
     command: bash
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
 
-  mysql:
-    # Existing MySQL service configuration
-    image: mysql:8.0
-    container_name: mysql_db
+  postgres:
+    image: postgres:17
+    container_name: postgres_db
     env_file:
       - .env
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_DEFAULT_AUTHENTICATION_PLUGIN: mysql_native_password
+      POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DATABASE}
     ports:
-      - "${MYSQL_LOCAL_PORT}:3306"
+      - "${POSTGRES_LOCAL_PORT}:5432"
     volumes:
-      - ./mysql-data:/var/lib/mysql
-      - ./mysql-init:/docker-entrypoint-initdb.d
+      - ./postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 5s
+      timeout: 5s
       retries: 10
 
 volumes:
-  mysql-data:
+  postgres-data:
+    driver: local

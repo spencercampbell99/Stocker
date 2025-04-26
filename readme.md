@@ -1,9 +1,12 @@
 # SPY Stock Model Work
 This application is meant to store some historical data for SPY and to build a predictive model which can reliably predict whether SPY will move $5 up or down from market open.
 
+## Stack
+Python, Postgres, Django, Docker, Alpaca-py (for stock data)
+
 ## Useful Commands
-Access mysql in docker
-`docker exec -it mysql_db mysql -uroot -p"password"`
+Access postgres in docker
+`docker exec -it postgres psql -U {Your user}`
 
 Access modeling app python in docker
 `docker exec -it modeling_dev bash`

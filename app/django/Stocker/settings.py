@@ -39,7 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'stocks'
+    'stocks',
+    'psqlextra',  # PostgreSQL extensions for Django
 ]
 
 MIDDLEWARE = [
@@ -81,15 +82,12 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('MYSQL_DATABASE', 'your_database_name'),
-        'USER': os.environ.get('MYSQL_USER', 'your_database_user'),
-        'PASSWORD': os.environ.get('MYSQL_PASSWORD', 'your_database_password'),
+        'ENGINE': 'psqlextra.backend',
+        'NAME': os.environ.get('POSTGRES_DATABASE', 'stocker'),
+        'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+        'PASSWORD': os.environ.get('POSTGRES_ROOT_PASSWORD', 'postgres'),
         'HOST': os.environ.get('DB_HOST', 'localhost'),
-        'PORT': os.environ.get('MYSQL_LOCAL_PORT', '3306'),
-        'OPTIONS': {
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'"
-        }
+        'PORT': os.environ.get('POSTGRES_LOCAL_PORT', '5432'),
     }
 }
 

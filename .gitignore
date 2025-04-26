@@ -1,5 +1,5 @@
 .env
 /app/venv
-/mysql-data
+/postgres-data
 
 **/__pycache__/

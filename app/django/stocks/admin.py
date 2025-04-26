@@ -3,30 +3,31 @@ from .models import Ticker, DailyCandle, FiveMinCandle, ThirtyMinCandle, HourCan
 
 @admin.register(Ticker)
 class TickerAdmin(admin.ModelAdmin):
-    list_display = ('symbol', 'name', 'sector', 'is_active')
-    search_fields = ('symbol', 'name')
-    list_filter = ('is_active', 'sector')
+    list_display = ('symbol', 'name', 'sector', 'is_active', 'created_at', 'updated_at')
+    search_fields = ('symbol', 'name', 'sector')
+    list_filter = ('is_active', 'sector', 'created_at')
+    readonly_fields = ('created_at', 'updated_at')
+
+class BaseCandleAdmin(admin.ModelAdmin):
+    list_display = ('__str__', 'ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume')
+    list_filter = ('ticker',)
+    search_fields = ('ticker__symbol',)
+    date_hierarchy = 'timestamp'
+    readonly_fields = ('id',)
+    ordering = ('ticker', 'timestamp')
 
 @admin.register(DailyCandle)
-class DailyCandleAdmin(admin.ModelAdmin):
-    list_display = ('ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume')
-    list_filter = ('ticker',)
-    date_hierarchy = 'timestamp'
+class DailyCandleAdmin(BaseCandleAdmin):
+    pass
 
 @admin.register(FiveMinCandle)
-class FiveMinCandleAdmin(admin.ModelAdmin):
-    list_display = ('ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume')
-    list_filter = ('ticker',)
-    date_hierarchy = 'timestamp'
+class FiveMinCandleAdmin(BaseCandleAdmin):
+    pass
 
 @admin.register(ThirtyMinCandle)
-class ThirtyMinCandleAdmin(admin.ModelAdmin):
-    list_display = ('ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume')
-    list_filter = ('ticker',)
-    date_hierarchy = 'timestamp'
+class ThirtyMinCandleAdmin(BaseCandleAdmin):
+    pass
 
 @admin.register(HourCandle)
-class HourCandleAdmin(admin.ModelAdmin):
-    list_display = ('ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume')
-    list_filter = ('ticker',)
-    date_hierarchy = 'timestamp'
+class HourCandleAdmin(BaseCandleAdmin):
+    pass
