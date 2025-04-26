@@ -1,7 +1,7 @@
 from django.db import models
 from psqlextra.models import PostgresPartitionedModel
 from psqlextra.types import PostgresPartitioningMethod
-import uuid
+from django.db.models import Func
 
 class Ticker(models.Model):
     symbol = models.CharField(max_length=10, unique=True)
@@ -20,8 +20,13 @@ class Ticker(models.Model):
         return self.symbol
 
 
+class RandomUUID(Func):
+    function = 'gen_random_uuid'  # PostgreSQL 13+ function
+    template = '%(function)s()'
+    output_field = models.UUIDField()
+
 class BaseCandle(PostgresPartitionedModel):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id=models.UUIDField(primary_key=True, editable=False, db_default=RandomUUID())
     ticker = models.CharField(max_length=10, db_index=True)
     timestamp = models.DateTimeField()
     open = models.DecimalField(max_digits=8, decimal_places=2)
