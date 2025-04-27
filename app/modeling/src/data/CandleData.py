@@ -17,8 +17,8 @@ from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import Adjustment
 from alpaca.data.timeframe import TimeFrameUnit
 
-from src.data.AlpacaConnector import AlpacaConnector
-from src.db.database import StockSymbol, init_db, get_session, get_engine, DailyCandle, HourlyCandle, FiveMinuteCandle, ThirtyMinuteCandle
+from data.AlpacaConnector import AlpacaConnector
+from db.database import StockSymbol, init_db, get_session, get_engine, DailyCandle, HourlyCandle, FiveMinuteCandle, ThirtyMinuteCandle
 from datetime import timedelta
 
 

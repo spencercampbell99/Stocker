@@ -10,9 +10,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from alpaca.trading.requests import GetAssetsRequest
 from alpaca.trading.enums import AssetStatus
 
-from src.db.PostgresConnector import PostgresConnector
-from src.data.AlpacaConnector import AlpacaConnector
-from src.db.database import StockSymbol, init_db, get_session
+from db.PostgresConnector import PostgresConnector
+from data.AlpacaConnector import AlpacaConnector
+from db.database import StockSymbol, init_db, get_session
 
 
 class SymbolDataManager:

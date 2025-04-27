@@ -15,8 +15,8 @@ import argparse
 # Add parent directory to path to import our modules
 sys.path.append(str(Path(__file__).parents[2]))
 
-from src.data.CandleData import CandleDataManager
-from src.data.SymbolData import SymbolDataManager
+from data.CandleData import CandleDataManager
+from data.SymbolData import SymbolDataManager
 
 
 def validate_date(date_str):

@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parents[2]))
 
 # Import PostgresConnector
-from src.db.PostgresConnector import PostgresConnector
+from db.PostgresConnector import PostgresConnector
 
 def test_connection():
     """Test basic connection to PostgreSQL database"""

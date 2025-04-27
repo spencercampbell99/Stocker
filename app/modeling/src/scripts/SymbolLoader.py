@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent directory to path to import our modules
 sys.path.append(str(Path(__file__).parents[2]))
 
-from src.data.SymbolData import SymbolDataManager
+from data.SymbolData import SymbolDataManager
 
 
 def main():

@@ -17,8 +17,8 @@ from typing import List, Dict, Callable, Any
 # Add src directory to path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from src.data.SymbolData import SymbolDataManager
-from src.scripts.CandleLoader import load_candles, validate_date, validate_time
+from data.SymbolData import SymbolDataManager
+from scripts.CandleLoader import load_candles, validate_date, validate_time
 
 
 def clear_screen():

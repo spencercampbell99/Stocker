@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 from contextlib import contextmanager
 
-from src.db.database import Base, get_engine, get_session
+from db.database import Base, get_engine, get_session
 
 class PostgresConnector:
     """
