@@ -50,6 +50,7 @@ def simulate_options_trading(model, metadata, daily_data):
         'us10y_close': daily_data['us10y_close'],
         'vix_open': daily_data['vix_open'],
         'us10y_open': daily_data['us10y_open'],
+        'thirty_to_close_price': daily_data['thirty_to_close_price'],
     })
     
     # Initialize trading variables
@@ -76,6 +77,7 @@ def simulate_options_trading(model, metadata, daily_data):
         us10y_close = row['us10y_close']
         vix_open = row['vix_open']
         us10y_open = row['us10y_open']
+        thirty_to_close_price = row['thirty_to_close_price']
         
         # Create entry time (market open)
         entry_time = datetime.combine(date, TRADE_START_TIME)
@@ -106,38 +108,39 @@ def simulate_options_trading(model, metadata, daily_data):
         
         if strike is None:
             continue  # Skip if no valid option found
-            
+        
+        # (1 / 252) / 13 is 30 minutes to close for time to expire (1/13th of a trading day is 30 minutes)
         if actual == 0:
             # Simulate option performance
             performance_pct = simulate_option_performance(
-                exit_ticker_price=market_open * 0.995,
+                exit_ticker_price=thirty_to_close_price,
                 entry_premium=premium,
                 strike=strike,
                 us10y=us10y_open,
                 vix=vix_open,
                 direction=option_type,
-                expir_time_override = (1 / 252) / 2 # assume selling mid day
+                expir_time_override = (1 / 252) / 13
             )
         elif actual == 2:
             # Simulate option performance
             performance_pct = simulate_option_performance(
-                exit_ticker_price=market_open * 1.005,
+                exit_ticker_price=thirty_to_close_price,
                 entry_premium=premium,
                 strike=strike,
                 us10y=us10y_open,
                 vix=vix_open,
                 direction=option_type,
-                expir_time_override = (1 / 252) / 2 # assume selling mid day
+                expir_time_override = (1 / 252) / 13
             )
         else:
             performance_pct = simulate_option_performance(
-                exit_ticker_price=market_close,
+                exit_ticker_price=thirty_to_close_price,
                 entry_premium=premium,
                 strike=strike,
                 us10y=us10y_open,
                 vix=vix_open,
                 direction=option_type,
-                expir_time_override = (1 / 252) / 10 # selling before end of day
+                expir_time_override = (1 / 252) / 13
             )
         
         def get_position_size(balance, premium):
@@ -168,7 +171,7 @@ def simulate_options_trading(model, metadata, daily_data):
         trades.append({
             'date': date,
             'entry_time': entry_time,
-            'exit_time': exit_time,
+            'exit_time': "15:30:00",
             'prediction': prediction,
             'actual': actual,
             'option_type': option_type,
@@ -177,6 +180,7 @@ def simulate_options_trading(model, metadata, daily_data):
             'us10y_close': us10y_close,
             'premium': premium,
             'entry_price': market_open,
+            'rough_exit_price': thirty_to_close_price,
             'close_price': market_close,
             'position_size': position_size,
             'performance_pct': performance_pct * 100,
@@ -324,7 +328,7 @@ def save_options_trading_results_to_table(trading_results, table_name="options_t
     CREATE TABLE {table_name} (
         date DATE,
         entry_time TIMESTAMP,
-        exit_time TIMESTAMP,
+        exit_time TIME,
         prediction INT,
         actual INT,
         option_type VARCHAR(5),
@@ -333,6 +337,7 @@ def save_options_trading_results_to_table(trading_results, table_name="options_t
         us10y_close FLOAT,
         premium FLOAT, 
         entry_price FLOAT,
+        rough_exit_price FLOAT,
         close_price FLOAT,
         position_size FLOAT,
         performance_pct FLOAT,

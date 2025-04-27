@@ -21,7 +21,7 @@ from models.DataHandler import get_up_down_percent_model_data
 sys.path.append(str(Path(__file__).parents[3]))
 
 # Constants
-START_DATE = "2024-01-01"
+START_DATE = "2025-01-01"
 TICKER = "SPY"
 MODEL_VERSION = "v0.1"
 
@@ -84,7 +84,6 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     """)
     
     macro_data = db.execute(query).fetchall()
-    db.close()
     
     # Convert to DataFrame
     macro_data = pd.DataFrame(macro_data, columns=['date', 'vix_close', 'us10y_close', 'vix_open', 'us10y_open'])
@@ -102,6 +101,29 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     
     # merge with core data
     data = pd.concat([data, macro_data], axis=1)
+    
+    # Get open price at 30 mins to close for each day
+    query = text(f"""
+        SELECT
+            "timestamp"::date as date,
+            open
+        FROM
+            stocks_thirtymincandle
+        WHERE
+            ticker = '{ticker}'
+            AND "timestamp" >= '{start_date}'
+            AND "timestamp"::time = '15:30:00'
+    """)
+    
+    thirty_to_close_data = db.execute(query).fetchall()
+    db.close()
+    
+    # convert to DataFrame and concat
+    thirty_to_close_data = pd.DataFrame(thirty_to_close_data, columns=['date', 'thirty_to_close_price'])
+    thirty_to_close_data['date'] = pd.to_datetime(thirty_to_close_data['date'])
+    thirty_to_close_data.set_index('date', inplace=True)
+    
+    data = pd.concat([data, thirty_to_close_data], axis=1)
     
     # make sure all data columns are float
     for col in data.columns:

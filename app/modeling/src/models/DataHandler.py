@@ -92,7 +92,7 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     data_5min = data_5min.join(slope_df, on='date', how='left')
 
     # --- Cleanup ---
-    data = data.drop(columns=["open", "volume"])
+    data = data.drop(columns=['open', "volume"])
     data_5min = data_5min.drop(columns=["open", "high", "low", "close", "volume"])
     
     # --- Merge Data ---
