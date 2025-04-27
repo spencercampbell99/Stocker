@@ -21,7 +21,36 @@ from data.AlpacaConnector import AlpacaConnector
 from db.database import StockSymbol, init_db, get_session, get_engine, DailyCandle, HourlyCandle, FiveMinuteCandle, ThirtyMinuteCandle
 from datetime import timedelta
 
-
+def adjust_timezone_vectorized(df: pd.DataFrame) -> pd.DataFrame:
+    eastern_tz = ZoneInfo("America/New_York")
+    if isinstance(df.index, pd.MultiIndex):
+        timestamps = df.index.get_level_values(1)
+        if timestamps.tz is None:
+            timestamps = timestamps.tz_localize('UTC')
+        
+        # Vectorized adjustment
+        adjustments = timestamps.map(
+            lambda x: timedelta(hours=-4) 
+            if x.tz_convert(eastern_tz).dst() 
+            else timedelta(hours=-5)
+        )
+        
+        df.index = pd.MultiIndex.from_arrays([
+            df.index.get_level_values(0),
+            timestamps + adjustments
+        ])
+    else:
+        if df.index.tz is None:
+            df.index = df.index.tz_localize('UTC')
+        
+        adjustments = df.index.map(
+            lambda x: timedelta(hours=-4) 
+            if x.tz_convert(eastern_tz).dst() 
+            else timedelta(hours=-5)
+        )
+        df.index += adjustments
+    
+    return df
 class CandleDataManager:
     """
     Class to manage candle/price data operations using Alpaca API.
@@ -124,23 +153,7 @@ class CandleDataManager:
                 print(f"No data found for {ticker} from {start_date} to {end_date}")
                 return df
             
-            # Time adjust (accounting for daylight savings UTC->EST)
-            time_adjust = timedelta(hours=4) if self.eastern_tz.utcoffset(datetime.now()) == timedelta(hours=-4) else timedelta(hours=5)
-            
-            # Make sure timezone is set to Eastern Time for multi-index DataFrame
-            # For multi-index DataFrame, get the timestamp level and convert timezone
-            if isinstance(df.index, pd.MultiIndex):
-                # Get the timestamp level (second level) and convert timezone
-                timestamps = df.index.get_level_values(1).tz_convert(self.eastern_tz)
-                
-                # Adjust time back 4 hours and 1 timeframe (no idea why this is happening, seems to return in wrong tz)
-                timestamps = timestamps - time_adjust
-                
-                # Recreate the multi-index with the converted timestamps
-                df.index = pd.MultiIndex.from_arrays([df.index.get_level_values(0), timestamps])
-            else:
-                # For single-level index, convert directly
-                df.index = df.index.tz_convert(self.eastern_tz) - time_adjust
+            df = adjust_timezone_vectorized(df)
             
             # Filter by time of day if specified
             if start_time and end_time and timeframe != 'daily':
