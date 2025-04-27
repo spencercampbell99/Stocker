@@ -7,23 +7,44 @@
     <title>Stock Dashboard - {{ selected_ticker }}</title>
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.0.0/dist/chart.umd.min.js"></script>
-    <!-- Chart.js adapter for date handling -->
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-    <!-- Lightweight and powerful candlestick extension -->
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.1.1/dist/chartjs-chart-financial.min.js"></script>
     <style>
-        .chart-container {
-            height: 500px;
+        .data-container {
+            height: auto;
             margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f8f9fa;
         }
-        .timeframe-nav {
-            margin-bottom: 20px;
+        .real-time-data {
+            font-size: 1.2rem;
+            font-weight: bold;
         }
-        .timeframe-nav .nav-link.active {
-            background-color: #007bff;
-            color: white;
+        .price-up {
+            color: green;
+        }
+        .price-down {
+            color: red;
+        }
+        .price-unchanged {
+            color: gray;
+        }
+        .ma-badge {
+            margin-right: 10px;
+            padding: 5px 10px;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+        }
+        .status-connected {
+            background-color: green;
+        }
+        .status-disconnected {
+            background-color: red;
         }
     </style>
 </head>
@@ -53,62 +74,74 @@
         
         {% if selected_ticker %}
             <div class="row mb-3">
-                <div class="col">
-                    <h2>{{ selected_ticker }} Stock Data (Last Year)</h2>
+                <div class="col-md-6">
+                    <h2>{{ selected_ticker }} Real-Time Data</h2>
                 </div>
-            </div>
-            
-            <!-- Timeframe Navigation Tabs -->
-            <ul class="nav nav-tabs timeframe-nav" id="timeframeTabs" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="daily-tab" data-bs-toggle="tab" data-timeframe="daily" type="button" role="tab" aria-selected="true">Daily</button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="hour-tab" data-bs-toggle="tab" data-timeframe="hour" type="button" role="tab" aria-selected="false">Hour</button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="thirty-min-tab" data-bs-toggle="tab" data-timeframe="thirty_min" type="button" role="tab" aria-selected="false">30 Min</button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="five-min-tab" data-bs-toggle="tab" data-timeframe="five_min" type="button" role="tab" aria-selected="false">5 Min</button>
-                </li>
-            </ul>
-            
-            <!-- Chart Display -->
-            <div class="row">
-                <div class="col">
-                    <div class="chart-container">
-                        <canvas id="stockChart"></canvas>
+                <div class="col-md-6 text-end">
+                    <div class="connection-status">
+                        <span class="status-indicator status-disconnected" id="connectionStatus"></span>
+                        <span id="connectionText">Disconnected</span>
                     </div>
                 </div>
             </div>
             
-            <!-- Moving Average Legend -->
-            <div class="row">
+            <!-- Real-time data display -->
+            <div class="row mb-4">
                 <div class="col">
-                    <div class="card">
-                        <div class="card-header">
-                            <h5>Moving Averages</h5>
+                    <div class="data-container">
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <button id="connectBtn" class="btn btn-success">Connect to Real-Time Data</button>
+                                <button id="disconnectBtn" class="btn btn-danger ms-2" disabled>Disconnect</button>
+                            </div>
+                            <div class="col-md-8 text-end">
+                                <div class="timestamp" id="lastUpdateTime">Last update: --</div>
+                            </div>
                         </div>
-                        <div class="card-body">
-                            <div class="d-flex gap-3">
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" role="switch" id="ma20Switch" checked>
-                                    <label class="form-check-label" for="ma20Switch">
-                                        <span style="color: #4bc0c0;">MA20</span>
-                                    </label>
+                        
+                        <div class="row mb-4">
+                            <div class="col">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5>Current Quote</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="real-time-data">
+                                            <div>Price: <span id="currentPrice">--</span></div>
+                                            <div>Change: <span id="priceChange">--</span></div>
+                                            <div>Bid: <span id="bidPrice">--</span> x <span id="bidSize">--</span></div>
+                                            <div>Ask: <span id="askPrice">--</span> x <span id="askSize">--</span></div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" role="switch" id="ma50Switch" checked>
-                                    <label class="form-check-label" for="ma50Switch">
-                                        <span style="color: #ff6384;">MA50</span>
-                                    </label>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5>5-Minute Moving Averages</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div>
+                                            <span class="badge bg-primary ma-badge" id="ma5min9">9 MA: --</span>
+                                            <span class="badge bg-success ma-badge" id="ma5min20">20 MA: --</span>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" role="switch" id="ma200Switch" checked>
-                                    <label class="form-check-label" for="ma200Switch">
-                                        <span style="color: #ffcd56;">MA200</span>
-                                    </label>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5>Daily Moving Averages</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div>
+                                            <span class="badge bg-primary ma-badge" id="maDaily9">9 MA: --</span>
+                                            <span class="badge bg-success ma-badge" id="maDaily20">20 MA: --</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -123,222 +156,149 @@
     
     {% if selected_ticker %}
     <script>
-        // Register the financial chart components
-        Chart.register({
-            id: 'chartjs-chart-financial',
-            beforeInit: function(chart) {
-                console.log('Financial chart plugin registered');
-            }
-        });
-        
-        // Chart configuration and data fetching
-        let stockChart;
+        // WebSocket connection and real-time data handling
+        let socket;
         const ticker = '{{ selected_ticker }}';
-        let currentTimeframe = 'daily';  // Default timeframe
+        let lastPrice = null;
         
-        // Function to format date based on timeframe
-        function formatDate(dateStr, timeframe) {
-            const date = new Date(dateStr);
-            if (timeframe === 'daily') {
-                return date.toLocaleDateString();
+        // Function to format numbers with commas
+        function formatNumber(num) {
+            return new Intl.NumberFormat().format(num);
+        }
+        
+        // Function to format price to 2 decimal places
+        function formatPrice(price) {
+            return parseFloat(price).toFixed(2);
+        }
+        
+        // Function to update UI connection status
+        function updateConnectionStatus(connected) {
+            const statusIndicator = document.getElementById('connectionStatus');
+            const statusText = document.getElementById('connectionText');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            
+            if (connected) {
+                statusIndicator.classList.remove('status-disconnected');
+                statusIndicator.classList.add('status-connected');
+                statusText.textContent = 'Connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
             } else {
-                return date.toLocaleString();
+                statusIndicator.classList.remove('status-connected');
+                statusIndicator.classList.add('status-disconnected');
+                statusText.textContent = 'Disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
             }
         }
         
-        // Function to toggle visibility of moving averages
-        function toggleMovingAverage(period, visible) {
-            if (stockChart) {
-                const dataset = stockChart.data.datasets.find(d => d.label === `MA${period}`);
-                if (dataset) {
-                    dataset.hidden = !visible;
-                    stockChart.update();
+        // Function to handle trades data
+        function handleTrade(trade) {
+            // Update price display
+            document.getElementById('currentPrice').textContent = `$${formatPrice(trade.price)}`;
+            
+            // Update price change
+            if (lastPrice !== null) {
+                const priceChange = trade.price - lastPrice;
+                const priceChangeElement = document.getElementById('priceChange');
+                priceChangeElement.textContent = `${priceChange > 0 ? '+' : ''}${formatPrice(priceChange)} (${priceChange > 0 ? '+' : ''}${(priceChange / lastPrice * 100).toFixed(2)}%)`;
+                
+                if (priceChange > 0) {
+                    priceChangeElement.className = 'price-up';
+                } else if (priceChange < 0) {
+                    priceChangeElement.className = 'price-down';
+                } else {
+                    priceChangeElement.className = 'price-unchanged';
                 }
             }
+            
+            lastPrice = trade.price;
+            
+            // Update timestamp
+            document.getElementById('lastUpdateTime').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
         }
         
-        // Function to update chart with new data from API
-        async function updateChart(timeframe) {
+        // Function to handle quote data
+        function handleQuote(quote) {
+            console.log(quote);
+            document.getElementById('bidPrice').textContent = `$${formatPrice(quote.bidPrice)}`;
+            document.getElementById('bidSize').textContent = formatNumber(quote.bidSize);
+            document.getElementById('askPrice').textContent = `$${formatPrice(quote.askPrice)}`;
+            document.getElementById('askSize').textContent = formatNumber(quote.askSize);
+        }
+        
+        // Function to handle moving average updates
+        function handleMovingAverages(data) {
+            if (data.ma5min9) document.getElementById('ma5min9').textContent = `9 MA: $${formatPrice(data.ma5min9)}`;
+            if (data.ma5min20) document.getElementById('ma5min20').textContent = `20 MA: $${formatPrice(data.ma5min20)}`;
+            if (data.maDaily9) document.getElementById('maDaily9').textContent = `9 MA: $${formatPrice(data.maDaily9)}`;
+            if (data.maDaily20) document.getElementById('maDaily20').textContent = `20 MA: $${formatPrice(data.maDaily20)}`;
+        }
+        
+        // Function to connect to the Alpaca WebSocket
+        function connectToAlpaca() {
             try {
-                console.log(`Fetching data for ${ticker} with timeframe ${timeframe}`);
-                const response = await fetch(`/api/stock-data/?ticker=${ticker}&timeframe=${timeframe}`);
+                // Use server-side endpoint to establish WebSocket with ticker as part of URL path
+                const wsUrl = `/api/ws-connect?ticker=${ticker}`;
                 
-                if (!response.ok) {
-                    console.error(`API error: ${response.status}`);
-                    return;
-                }
+                // Create WebSocket connection
+                socket = new WebSocket(`ws://${window.location.host}${wsUrl}`);
                 
-                const data = await response.json();
-                
-                console.log('Received data:', data);
-                
-                // Check if we have data
-                if (!data.candles || data.candles.length === 0) {
-                    console.warn('No candle data available');
-                    document.getElementById('stockChart').parentElement.innerHTML = 
-                        '<div class="alert alert-warning">No data available for this ticker and timeframe.</div>';
-                    return;
-                }
-                
-                // Format data for chart.js
-                const ohlcData = data.candles.map(candle => ({
-                    x: new Date(candle.timestamp),
-                    o: parseFloat(candle.open),
-                    h: parseFloat(candle.high),
-                    l: parseFloat(candle.low),
-                    c: parseFloat(candle.close)
-                }));
-                
-                console.log('Formatted OHLC data:', ohlcData);
-                
-                // Destroy previous chart if it exists
-                if (stockChart) {
-                    stockChart.destroy();
-                }
-                
-                // Create datasets array starting with candlestick data
-                const datasets = [
-                    {
-                        label: `${ticker} Price`,
-                        data: ohlcData,
-                        type: 'candlestick',
-                        color: {
-                            up: 'rgba(38, 166, 154, 1)',
-                            down: 'rgba(239, 83, 80, 1)',
-                            unchanged: 'rgba(156, 39, 176, 1)',
-                        }
-                    }
-                ];
-                
-                // Add moving average datasets
-                const maColors = {
-                    'MA20': 'rgb(75, 192, 192)',
-                    'MA50': 'rgb(255, 99, 132)',
-                    'MA200': 'rgb(255, 205, 86)'
+                socket.onopen = function(e) {
+                    console.log('WebSocket connection established');
+                    updateConnectionStatus(true);
                 };
                 
-                // Add moving averages if available
-                Object.entries(data.moving_averages).forEach(([key, values]) => {
-                    if (values && values.length > 0) {
-                        datasets.push({
-                            label: key,
-                            data: values.map((value, index) => value ? {
-                                x: new Date(data.candles[index].timestamp),
-                                y: value
-                            } : null).filter(item => item !== null),
-                            type: 'line',
-                            borderColor: maColors[key] || 'rgba(0, 0, 0, 0.5)',
-                            pointRadius: 0,
-                            borderWidth: 2,
-                            fill: false,
-                            tension: 0.1,
-                            hidden: document.getElementById(`${key.toLowerCase()}Switch`) ? !document.getElementById(`${key.toLowerCase()}Switch`).checked : false
-                        });
+                socket.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    console.log('Received data:', data);
+                    
+                    if (data.type === 'trade') {
+                        handleTrade(data);
+                    } else if (data.type === 'quote') {
+                        handleQuote(data);
+                    } else if (data.type === 'ma_data') {
+                        handleMovingAverages(data);
+                    } else if (data.type === 'error') {
+                        console.error('WebSocket error:', data.message);
+                        alert(`Error: ${data.message}`);
                     }
-                });
+                };
                 
-                // Create the chart
-                const ctx = document.getElementById('stockChart').getContext('2d');
-                try {
-                    console.log('Creating chart with datasets:', datasets);
-                    stockChart = new Chart(ctx, {
-                        type: 'bar', // Default type that Chart.js recognizes
-                        data: {
-                            datasets: datasets
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            scales: {
-                                x: {
-                                    type: 'time',
-                                    time: {
-                                        unit: timeframe === 'daily' ? 'day' : 'hour'
-                                    }
-                                },
-                                y: {
-                                    beginAtZero: false
-                                }
-                            },
-                            plugins: {
-                                tooltip: {
-                                    mode: 'index',
-                                    intersect: false,
-                                    callbacks: {
-                                        label: function(context) {
-                                            const dataPoint = context.raw;
-                                            if (dataPoint && dataPoint.o !== undefined) {
-                                                return [
-                                                    `Open: ${dataPoint.o}`,
-                                                    `High: ${dataPoint.h}`,
-                                                    `Low: ${dataPoint.l}`,
-                                                    `Close: ${dataPoint.c}`
-                                                ];
-                                            } else if (dataPoint && dataPoint.y !== undefined) {
-                                                return context.dataset.label + ': ' + dataPoint.y;
-                                            } else {
-                                                return context.dataset.label;
-                                            }
-                                        }
-                                    }
-                                },
-                                legend: {
-                                    display: true,
-                                    position: 'top'
-                                },
-                                title: {
-                                    display: true,
-                                    text: `${ticker} - ${timeframe.replace('_', ' ').toUpperCase()} Chart`
-                                }
-                            }
-                        }
-                    });
-                    console.log('Chart created successfully:', stockChart);
-                } catch (chartError) {
-                    console.error('Error creating chart:', chartError);
-                    document.getElementById('stockChart').parentElement.innerHTML = 
-                        `<div class="alert alert-danger">Error creating chart: ${chartError.message}</div>`;
-                }
+                socket.onclose = function(event) {
+                    if (event.wasClean) {
+                        console.log(`Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                    } else {
+                        console.error('Connection died');
+                    }
+                    updateConnectionStatus(false);
+                };
+                
+                socket.onerror = function(error) {
+                    console.error(`WebSocket Error: ${error.message}`);
+                    updateConnectionStatus(false);
+                };
                 
             } catch (error) {
-                console.error('Error fetching stock data:', error);
+                console.error('Error connecting to WebSocket:', error);
+                alert(`Failed to connect to WebSocket: ${error.message}`);
             }
         }
         
-        // Initialize chart when page loads
+        // Function to disconnect from WebSocket
+        function disconnectFromAlpaca() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+                updateConnectionStatus(false);
+            }
+        }
+        
+        // Initialize when page loads
         document.addEventListener('DOMContentLoaded', () => {
-            // Load initial chart data
-            updateChart(currentTimeframe);
-            
-            // Setup timeframe tab event handlers
-            document.querySelectorAll('[data-timeframe]').forEach(tab => {
-                tab.addEventListener('click', (event) => {
-                    // Update active tab
-                    document.querySelectorAll('[data-timeframe]').forEach(t => {
-                        t.classList.remove('active');
-                        t.setAttribute('aria-selected', 'false');
-                    });
-                    event.target.classList.add('active');
-                    event.target.setAttribute('aria-selected', 'true');
-                    
-                    // Update chart with new timeframe
-                    currentTimeframe = event.target.getAttribute('data-timeframe');
-                    updateChart(currentTimeframe);
-                });
-            });
-            
-            // Setup moving average toggle handlers
-            document.getElementById('ma20Switch')?.addEventListener('change', (e) => {
-                toggleMovingAverage(20, e.target.checked);
-            });
-            
-            document.getElementById('ma50Switch')?.addEventListener('change', (e) => {
-                toggleMovingAverage(50, e.target.checked);
-            });
-            
-            document.getElementById('ma200Switch')?.addEventListener('change', (e) => {
-                toggleMovingAverage(200, e.target.checked);
-            });
+            // Setup event handlers for connect/disconnect buttons
+            document.getElementById('connectBtn').addEventListener('click', connectToAlpaca);
+            document.getElementById('disconnectBtn').addEventListener('click', disconnectFromAlpaca);
         });
     </script>
     {% endif %}

@@ -35,6 +35,8 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1']  # Add deployment domain in productio
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne',
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -42,7 +44,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'stocks',
-    'psqlextra',  # PostgreSQL extensions for Django
+    'psqlextra',
+    'AlpacaIntegration',
 ]
 
 MIDDLEWARE = [
@@ -72,6 +75,15 @@ TEMPLATES = [
         },
     },
 ]
+
+# Channels configuration
+ASGI_APPLICATION = 'Stocker.asgi.application'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
 
 WSGI_APPLICATION = 'Stocker.wsgi.application'
 
@@ -134,3 +146,9 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Alpaca API settings
+ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
+ALPACA_API_SECRET = os.environ.get('ALPACA_SECRET_KEY')
+ALPACA_API_BASE_URL = os.environ.get('ALPACA_API_BASE_URL', 'https://paper-api.alpaca.markets')
+ALPACA_DATA_FEED = os.environ.get('ALPACA_DATA_FEED', 'iex')
