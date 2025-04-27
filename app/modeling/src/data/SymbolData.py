@@ -39,6 +39,34 @@ class SymbolDataManager:
             print(f"Error ensuring database schema: {e}")
             return False
     
+    def _load_vix_ticker(self):
+        """
+        Load VIX ticker information manually as it is not available in Alpaca API.
+        
+        Returns:
+            dict: Dictionary containing VIX symbol information
+        """
+        return {
+            'symbol': 'VIX',
+            'name': 'CBOE Volatility Index',
+            'sector': 'Volatility',
+            'is_active': True,
+        }
+    
+    def _load_us_10y_ticker(self):
+        """
+        Load US 10-Year Treasury Note ticker information manually as it is not available in Alpaca API.
+        
+        Returns:
+            dict: Dictionary containing US 10Y symbol information
+        """
+        return {
+            'symbol': 'US10Y',
+            'name': 'US 10-Year Treasury Note',
+            'sector': 'Bonds',
+            'is_active': True,
+        }
+    
     def get_symbol_info(self, ticker):
         """
         Get information for a specific ticker symbol from Alpaca API.
@@ -49,7 +77,15 @@ class SymbolDataManager:
         Returns:
             dict: Dictionary containing symbol information or None if not found
         """
+        
         try:
+            if ticker.upper() == 'VIX':
+                # Load VIX ticker information manually
+                return self._load_vix_ticker()
+            elif ticker.upper() == 'US10Y':
+                # Load US 10Y ticker information manually
+                return self._load_us_10y_ticker()
+            
             # Get asset information
             search_params = GetAssetsRequest(status=AssetStatus.ACTIVE)
             assets = self.alpaca.trading_client.get_all_assets(search_params)
@@ -70,6 +106,7 @@ class SymbolDataManager:
                 }
                 return symbol_info
             else:
+                print(f"Ticker {ticker} not found in Alpaca assets.")
                 return None
                 
         except Exception as e:

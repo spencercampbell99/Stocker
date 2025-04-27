@@ -95,30 +95,35 @@ def load_candles(ticker, timeframe, start_date, end_date, start_time=None, end_t
         if start_time and end_time:
             print(f"Time filtering: {start_time} to {end_time}")
     
-    candle_data = candle_manager.get_candle_data(
-        ticker=ticker,
-        timeframe=timeframe,
-        start_date=start_date,
-        end_date=end_date,
-        start_time=start_time,
-        end_time=end_time
-    )
-    
-    if candle_data.empty:
-        return {
-            'success': False,
-            'message': f"No data found for {ticker} with the specified parameters."
-        }
-    
-    # Save to database
-    if verbose:
-        print(f"Found {len(candle_data)} candles. Saving to database...")
-    
-    result = candle_manager.save_candle_data(
-        ticker=ticker,
-        timeframe=timeframe,
-        data=candle_data
-    )
+    if ticker == 'VIX':
+        result = candle_manager.get_vix_candle_data()
+    elif ticker == 'US10Y':
+        result = candle_manager.get_10_year_treasury_candle_data()
+    else:
+        candle_data = candle_manager.get_candle_data(
+            ticker=ticker,
+            timeframe=timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            start_time=start_time,
+            end_time=end_time
+        )
+        
+        if candle_data.empty:
+            return {
+                'success': False,
+                'message': f"No data found for {ticker} with the specified parameters."
+            }
+        
+        # Save to database
+        if verbose:
+            print(f"Found {len(candle_data)} candles. Saving to database...")
+        
+        result = candle_manager.save_candle_data(
+            ticker=ticker,
+            timeframe=timeframe,
+            data=candle_data
+        )
     
     return result
 

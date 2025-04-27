@@ -96,6 +96,104 @@ class CandleDataManager:
         """Parse time string in HH:MM format to time object."""
         return datetime.strptime(time_str, "%H:%M").time()
     
+    def get_vix_candle_data(self):
+        """
+        Load daily VIX data from 1990 to present from CSV.
+        URL: https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv
+        
+        Returns:
+            Results of the operation as a dictionary.
+        """
+        try:
+            vix_url = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
+            vix_data = pd.read_csv(vix_url, parse_dates=['DATE'])
+            vix_data = vix_data.rename(columns={'CLOSE': 'close', 'OPEN': 'open', 'HIGH': 'high', 'LOW': 'low', 'DATE': 'timestamp'})
+            
+            # Fill volume with 0s
+            vix_data['volume'] = 0
+            
+            # Update timestamp by appending 00:00:00 to the date
+            vix_data['timestamp'] = pd.to_datetime(vix_data['timestamp'].dt.strftime('%Y-%m-%d 00:00:00'))
+            
+            # Add ticker
+            vix_data['ticker'] = 'VIX'
+        except Exception as e:
+            return {'success': False, 'message': f"Error loading VIX data: {e}"}
+        
+        try:
+            # Load data into stocks_dailycandle table
+            with get_session() as session:
+                # Delete existing VIX data
+                session.query(DailyCandle).filter_by(ticker='VIX').delete()
+                
+                # Insert vix data into the database
+                vix_data = vix_data[['ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
+                
+                session.bulk_insert_mappings(DailyCandle, vix_data.to_dict(orient='records'))
+                session.commit()
+        except SQLAlchemyError as e:
+            return {'success': False, 'message': f"Database error: {str(e)}"}
+        except Exception as e:
+            return {'success': False, 'message': f"Error saving VIX data: {e}"}
+        
+        return {'success': True, 'message': f'Successfully saved all daily VIX candles since 1990', 'count': len(vix_data)}
+    
+    def get_10_year_treasury_candle_data(self):
+        """
+        Load daily 10-year treasury data from 2000 to present using yfinance.
+        
+        Returns:
+            Results of the operation as a dictionary.
+        """
+        import yfinance as yf
+        try:
+            # Load 10-year treasury data
+            treasury_data = yf.download("^TNX", start="2000-01-01", end=datetime.now().strftime("%Y-%m-%d"), interval="1d")
+            
+            # Handle multi-index columns if present
+            if isinstance(treasury_data.columns, pd.MultiIndex):
+                # Get the second level which contains actual column names
+                treasury_data.columns = treasury_data.columns.get_level_values(0)
+            
+            # Standard column renaming
+            treasury_data = treasury_data.rename(columns={'Close': 'close', 'Open': 'open', 'High': 'high', 'Low': 'low'})
+            
+            # Reset index to get timestamp as a column
+            treasury_data.reset_index(inplace=True)
+            
+            # Add 00:00:00 to the date
+            treasury_data['Date'] = pd.to_datetime(treasury_data['Date'].dt.strftime('%Y-%m-%d 00:00:00'))
+            
+            # Add ticker
+            treasury_data['ticker'] = 'US10Y'
+            
+            # Ensure volume column exists (might be missing or named differently)
+            if 'Volume' in treasury_data.columns:
+                treasury_data.rename(columns={'Volume': 'volume'}, inplace=True)
+            elif 'volume' not in treasury_data.columns:
+                treasury_data['volume'] = 0
+        except Exception as e:
+            return {'success': False, 'message': f"Error loading 10-year treasury data: {e}"}
+        
+        try:
+            # Load data into stocks_dailycandle table
+            with get_session() as session:
+                # Delete existing TNX data
+                session.query(DailyCandle).filter_by(ticker='US10Y').delete()
+                
+                # Insert TNX data into the database with consistent column ordering
+                treasury_data = treasury_data.rename(columns={'Date': 'timestamp'})
+                treasury_data = treasury_data[['ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
+                
+                session.bulk_insert_mappings(DailyCandle, treasury_data.to_dict(orient='records'))
+                session.commit()
+        except SQLAlchemyError as e:
+            return {'success': False, 'message': f"Database error: {str(e)}"}
+        except Exception as e:
+            return {'success': False, 'message': f"Error saving 10-year treasury data: {e}"}
+        
+        return {'success': True, 'message': f'Successfully saved all daily 10-year treasury candles since 2000', 'count': len(treasury_data)}
+    
     def get_candle_data(self, 
                        ticker: str, 
                        timeframe: str, 
