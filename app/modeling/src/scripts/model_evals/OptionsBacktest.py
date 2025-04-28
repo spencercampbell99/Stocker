@@ -16,6 +16,12 @@ import pandas as pd
 from sqlalchemy import text
 from db.database import get_session
 from models.DataHandler import get_up_down_percent_model_data
+from scripts.model_evals.TradingSimulation import (
+    simulate_options_trading,
+    plot_options_trading_results,
+    display_options_trading_results,
+    save_options_trading_results_to_table
+)
 
 # Add the src directory to the path for imports
 sys.path.append(str(Path(__file__).parents[3]))
@@ -131,14 +137,6 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
             data[col] = pd.to_numeric(data[col], errors='coerce')
     
     return data
-
-from TradingSimulation import (
-    simulate_options_trading, 
-    plot_options_trading_results,
-    display_options_trading_results,
-    save_options_trading_results_to_table
-)
-
 
 def load_model_and_metadata(model_version=MODEL_VERSION):
     """

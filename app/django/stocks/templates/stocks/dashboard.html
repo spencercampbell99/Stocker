@@ -7,6 +7,8 @@
     <title>Stock Dashboard - {{ selected_ticker }}</title>
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
         .data-container {
             height: auto;
@@ -46,11 +48,51 @@
         .status-disconnected {
             background-color: red;
         }
+        .market-indicators {
+            background-color: #f0f4f8;
+            border-left: 4px solid #4a6fa5;
+            padding: 10px 15px;
+            margin-bottom: 20px;
+            border-radius: 0 5px 5px 0;
+        }
+        .indicator-value {
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
     </style>
 </head>
 <body>
     <div class="container-fluid mt-4">
         <h1 class="mb-4">Stock Dashboard</h1>
+        
+        <!-- Market Indices -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="market-indicators">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h4>Market Indicators</h4>
+                            <div>Last update: <span id="indicesUpdateTime">--</span></div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="row">
+                                <div class="col-5">
+                                    <div>US 10Y Bond: <span id="us10yValue" class="indicator-value">--</span></div>
+                                </div>
+                                <div class="col-4">
+                                    <div>VIX: <span id="vixValue" class="indicator-value">--</span></div>
+                                </div>
+                                <div class="col-3 text-end">
+                                    <button id="updateIndicesBtn" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-arrow-clockwise"></i> Update Now
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <!-- Ticker Selection Form -->
         <div class="row mb-4">
@@ -221,7 +263,9 @@
         
         // Function to handle quote data
         function handleQuote(quote) {
-            console.log(quote);
+            // calculate Price from bid and ask
+            const price = (quote.bidPrice + quote.askPrice) / 2;
+            document.getElementById('currentPrice').textContent = `$${formatPrice(price)}`;
             document.getElementById('bidPrice').textContent = `$${formatPrice(quote.bidPrice)}`;
             document.getElementById('bidSize').textContent = formatNumber(quote.bidSize);
             document.getElementById('askPrice').textContent = `$${formatPrice(quote.askPrice)}`;
@@ -236,6 +280,46 @@
             if (data.maDaily20) document.getElementById('maDaily20').textContent = `20 MA: $${formatPrice(data.maDaily20)}`;
         }
         
+        // Function to handle market indices updates
+        function handleMarketIndices(data) {
+            // Update US 10Y Treasury yield
+            if (data.us10y && data.us10y.price) {
+                document.getElementById('us10yValue').textContent = `${formatPrice(data.us10y.price)}%`;
+            }
+            
+            // Update VIX
+            if (data.vix && data.vix.price) {
+                document.getElementById('vixValue').textContent = formatPrice(data.vix.price);
+            }
+            
+            // Update timestamp
+            document.getElementById('indicesUpdateTime').textContent = new Date().toLocaleTimeString();
+        }
+
+        // Function to request market indices update
+        function requestMarketIndicesUpdate() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                const updateButton = document.getElementById('updateIndicesBtn');
+                
+                // Disable button during update to prevent multiple requests
+                updateButton.disabled = true;
+                updateButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Updating...';
+                
+                // Send update request to the server
+                socket.send(JSON.stringify({
+                    command: 'update_indices',
+                }));
+                
+                // Enable button after a short delay
+                setTimeout(() => {
+                    updateButton.disabled = false;
+                    updateButton.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Update Now';
+                }, 2000);
+            } else {
+                alert('Please connect to the server first to update market indices.');
+            }
+        }
+
         // Function to connect to the Alpaca WebSocket
         function connectToAlpaca() {
             try {
@@ -252,7 +336,6 @@
                 
                 socket.onmessage = function(event) {
                     const data = JSON.parse(event.data);
-                    console.log('Received data:', data);
                     
                     if (data.type === 'trade') {
                         handleTrade(data);
@@ -260,6 +343,8 @@
                         handleQuote(data);
                     } else if (data.type === 'ma_data') {
                         handleMovingAverages(data);
+                    } else if (data.type === 'market_indices') {
+                        handleMarketIndices(data);
                     } else if (data.type === 'error') {
                         console.error('WebSocket error:', data.message);
                         alert(`Error: ${data.message}`);
@@ -285,10 +370,10 @@
                 alert(`Failed to connect to WebSocket: ${error.message}`);
             }
         }
-        
-        // Function to disconnect from WebSocket
+
+        // Function to disconnect from the Alpaca WebSocket
         function disconnectFromAlpaca() {
-            if (socket && socket.readyState === WebSocket.OPEN) {
+            if (socket) {
                 socket.close();
                 updateConnectionStatus(false);
             }
@@ -299,6 +384,9 @@
             // Setup event handlers for connect/disconnect buttons
             document.getElementById('connectBtn').addEventListener('click', connectToAlpaca);
             document.getElementById('disconnectBtn').addEventListener('click', disconnectFromAlpaca);
+            
+            // Setup event handler for update indices button
+            document.getElementById('updateIndicesBtn').addEventListener('click', requestMarketIndicesUpdate);
         });
     </script>
     {% endif %}

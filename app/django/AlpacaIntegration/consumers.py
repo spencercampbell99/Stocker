@@ -1,223 +1,264 @@
 import json
-import os
 import logging
 import asyncio
-from datetime import datetime, timedelta
+import websockets
+import uuid
 import pandas as pd
 import numpy as np
-from urllib.parse import parse_qs
+import yfinance as yf
+from datetime import datetime, timedelta
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-import alpaca_trade_api as tradeapi
-from alpaca_trade_api.stream import Stream
-from alpaca_trade_api.rest import REST
-from stocks.models import DailyCandle, FiveMinCandle
 from django.conf import settings
+from stocks.models import DailyCandle, FiveMinCandle
 
 logger = logging.getLogger(__name__)
 
 class AlpacaStreamConsumer(AsyncWebsocketConsumer):
-    """WebSocket consumer for streaming real-time stock data from Alpaca."""    
+    """WebSocket consumer for streaming real-time stock data directly from Alpaca."""
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.alpaca_ws = None
+        self.ticker = None
+        self.connection_id = str(uuid.uuid4())
+        self.keepalive_task = None
+        self.yfinance_task = None
+        # Update to use the configured data feed from settings
+        self.ALPACA_WS_URL = f"wss://stream.data.alpaca.markets/v2/{settings.ALPACA_DATA_FEED}"
+        
+        # Market indices from yfinance
+        self.market_indices = {"^TNX": None, "^VIX": None}  # Store the latest quotes for US10Y and VIX
+        self.indices_update_interval = 5 * 60  # Update market indices every 5 minutes (in seconds)
+        
+        # For throttling quotes
+        self.last_quote_time = datetime.now() - timedelta(seconds=10)  # Initialize to send first quote immediately
+        self.quote_throttle_seconds = 10  # Send quotes every 10 seconds
+        self.latest_quotes = {}  # Store latest quotes between throttle periods
     
     async def connect(self):
-        """Handle WebSocket connection."""
-        logger.info("WebSocket connection attempt started")
+        """Handle WebSocket connection."""        
+        logger.info(f"WebSocket connection attempt started (ID: {self.connection_id})")
         
         try:
-            # Get ticker from URL path parameters
-            self.ticker = self.scope['url_route']['kwargs'].get('ticker')
-            
-            # If not in path params, try to get from query string
-            if not self.ticker:
-                logger.debug("No ticker in URL path, checking query parameters")
-                query_string = self.scope['query_string'].decode()
-                
-                if query_string:
-                    try:
-                        query_params = parse_qs(query_string)
-                        self.ticker = query_params.get('ticker', [''])[0]
-                        logger.debug(f"Found ticker in query parameters: {self.ticker}")
-                    except Exception as e:
-                        logger.error(f"Error parsing query string: {e}")
-            
-            if not self.ticker:
-                logger.error("No ticker specified in WebSocket connection")
-                await self.close(code=4000)
-                return
-                
-            # Normalize ticker symbol
-            self.ticker = self.ticker.upper()
-            logger.info(f"WebSocket connection for ticker: {self.ticker}")
-            
-            # Create the group name for this ticker
-            self.ticker_group_name = f'alpaca_stream_{self.ticker}'
-            
-            # Initialize Alpaca clients
-            self.alpaca_stream = None
-            self.is_connected = False
-            
-            # Accept the connection
             await self.accept()
-            logger.info(f"WebSocket connection accepted for {self.ticker}")
             
-            # Initialize variables for data tracking
-            self.last_quote = None
+            API_KEY = settings.ALPACA_API_KEY
+            API_SECRET = settings.ALPACA_API_SECRET
             
-            # Get historical data for moving average calculations
-            await self.send_historical_data()
+            if not API_KEY or not API_SECRET:
+                logger.error("Alpaca API credentials not configured")
+                await self.send_error("Alpaca API credentials not configured")
+                await self.close(code=4001)
+                return
+
+            query_string = self.scope.get('query_string', b'').decode()
+            query_params = dict(param.split('=') for param in query_string.split('&') if param)
+            self.ticker = query_params.get('ticker')
             
-            # Start the Alpaca stream connection
-            await self.connect_to_alpaca()
+            if not self.ticker:
+                logger.error("Ticker not provided in WebSocket query parameters")
+                await self.send_error("Ticker not provided")
+                await self.close(code=4002)
+                return
+            
+            # Connect to Alpaca WebSocket
+            self.alpaca_ws = await websockets.connect(
+                self.ALPACA_WS_URL,
+                extra_headers={
+                    "APCA-API-KEY-ID": API_KEY,
+                    "APCA-API-SECRET-KEY": API_SECRET
+                }
+            )
+            
+            # Send authentication message
+            auth_msg = {
+                "action": "auth",
+                "key": API_KEY,
+                "secret": API_SECRET
+            }
+            await self.alpaca_ws.send(json.dumps(auth_msg))
+            
+            # Wait for auth response
+            auth_response = await self.alpaca_ws.recv()
+            
+            # Subscribe to quotes for our ticker only (not indices)
+            subscribe_msg = {
+                "action": "subscribe",
+                "quotes": [self.ticker]
+            }
+            await self.alpaca_ws.send(json.dumps(subscribe_msg))
+            
+            # Start background tasks
+            self.keepalive_task = asyncio.create_task(self.keepalive())
+            asyncio.create_task(self.stream_data())
+            
+            # Start yfinance market indices fetching task
+            self.yfinance_task = asyncio.create_task(self.fetch_market_indices_periodically())
+            
+            # Send historical data and fetch initial indices data
+            asyncio.create_task(self.send_historical_data())
+            # Fetch market indices data immediately
+            asyncio.create_task(self.fetch_market_indices())
             
         except Exception as e:
             logger.exception(f"Error during WebSocket connection: {e}")
-            # Try to send error to client if connection was already accepted
-            try:
-                if hasattr(self, 'accept') and self.accept:
-                    await self.send_error(f"Connection error: {str(e)}")
-            except:
-                pass
-            # Close the connection with an error code
+            await self.send_error(f"Connection error: {str(e)}")
+            await self.close_alpaca_connection()
             await self.close(code=4500)
     
     async def disconnect(self, close_code):
-        """Handle WebSocket disconnection."""
-        logger.info(f"WebSocket disconnection with code: {close_code}")
-        # Close Alpaca connection if active
+        """Handle WebSocket disconnection."""        
+        logger.info(f"WebSocket disconnection (ID: {self.connection_id}) with code: {close_code}")
+        
+        # Cancel the yfinance task
+        if self.yfinance_task:
+            self.yfinance_task.cancel()
+            try:
+                await self.yfinance_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Close Alpaca connection
         await self.close_alpaca_connection()
     
     async def receive(self, text_data):
-        """Handle incoming messages from WebSocket."""
+        """Handle incoming messages from WebSocket."""        
         try:
-            logger.debug(f"Received WebSocket message: {text_data[:100]}...")  # Log first 100 chars
+            logger.debug(f"Received WebSocket message (ID: {self.connection_id}): {text_data[:100]}...")
             data = json.loads(text_data)
             command = data.get('command')
             
-            if command == 'subscribe':
-                # Handle subscription to additional tickers
-                symbols = data.get('symbols', [])
-                if symbols and self.alpaca_stream:
-                    logger.info(f"Subscribing to additional symbols: {symbols}")
-                    await self.subscribe_to_tickers(symbols)
-            elif command == 'unsubscribe':
-                # Handle unsubscription from tickers
-                symbols = data.get('symbols', [])
-                if symbols and self.alpaca_stream:
-                    logger.info(f"Unsubscribing from symbols: {symbols}")
-                    await self.unsubscribe_from_tickers(symbols)
-            elif command == 'ping':
-                # Simple ping-pong to keep connection alive
+            if command == 'ping':
                 logger.debug("Received ping, sending pong")
-                await self.send(text_data=json.dumps({'type': 'pong', 'timestamp': datetime.now().isoformat()}))
+                await self.send(text_data=json.dumps({
+                    'type': 'pong',
+                    'timestamp': datetime.now().isoformat()
+                }))
+            elif command == 'update_indices':
+                logger.info(f"Manual update of market indices requested (ID: {self.connection_id})")
+                # Trigger immediate fetch of market indices
+                await self.fetch_market_indices()
             else:
-                logger.warning(f"Unknown command received: {command}")
+                logger.warning(f"Unknown command received (ID: {self.connection_id}): {command}")
         
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON received: {e}")
+            logger.error(f"Invalid JSON received (ID: {self.connection_id}): {e}")
             await self.send_error(f"Invalid JSON: {str(e)}")
         except Exception as e:
-            logger.exception(f"Error processing WebSocket message: {e}")
+            logger.exception(f"Error processing WebSocket message (ID: {self.connection_id}): {e}")
             await self.send_error(f"Failed to process command: {str(e)}")
-    
-    async def connect_to_alpaca(self):
-        """Connect to Alpaca WebSocket API."""        
-        try:
-            # Get Alpaca API credentials from environment
-            api_key = settings.ALPACA_API_KEY
-            api_secret = settings.ALPACA_API_SECRET
-            
-            if not api_key or not api_secret:
-                logger.error("Alpaca API credentials not configured")
-                await self.send_error("Alpaca API credentials not configured")
-                return
-            
-            logger.info(f"Initializing Alpaca stream client for {self.ticker}")
-            
-            # Initialize the alpaca stream connection
-            self.alpaca_stream = Stream(
-                key_id=api_key,
-                secret_key=api_secret,
-                base_url='https://paper-api.alpaca.markets',
-                data_feed='iex',  # Use 'sip' for production with proper subscriptions
-                raw_data=False
-            )
-            
-            # Define callback handlers for quotes
-            async def quote_handler(data):
-                try:
-                    logger.debug(f"Received quote update for {self.ticker}")
-                    
-                    # Make sure we're sending data in the format expected by the frontend
-                    # Extract the required data using proper error handling
-                    try:
-                        bid_price = float(data.bid_price)
-                        bid_size = int(data.bid_size)
-                        ask_price = float(data.ask_price)
-                        ask_size = int(data.ask_size)
-                        timestamp = data.timestamp
-                    except (AttributeError, ValueError) as e:
-                        logger.error(f"Error extracting quote data: {e}")
-                        return
-                    
-                    # Prepare quote data for frontend using the exact keys expected in the JS code
-                    quote_data = {
-                        'type': 'quote',
-                        'bidPrice': bid_price,
-                        'bidSize': bid_size,
-                        'askPrice': ask_price,
-                        'askSize': ask_size,
-                        'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
-                    }
-                    
-                    # Send to WebSocket client
-                    await self.send(text_data=json.dumps(quote_data))
-                    logger.debug(f"Sent quote data: bid={bid_price}, ask={ask_price}")
-                    
-                except Exception as e:
-                    logger.exception(f"Error handling quote update: {e}")
-            
-            # Register the handlers with the Alpaca stream
-            self.alpaca_stream.subscribe_quotes(quote_handler, self.ticker)
 
-            def run_stream():
+    async def stream_data(self):
+        """Stream data from Alpaca WebSocket to client."""        
+        try:
+            async for message in self.alpaca_ws:
                 try:
-                    self.alpaca_stream._run_forever()
+                    data = json.loads(message)
+                    # Alpaca can send data as a list or as a dictionary
+                    if isinstance(data, list):
+                        for item in data:
+                            await self.process_alpaca_message(item)
+                    else:
+                        await self.process_alpaca_message(data)
                 except Exception as e:
-                    logger.exception(f"Error in Alpaca stream: {e}")
-            
-            # Start the stream in a separate thread
-            import threading
-            self.stream_thread = threading.Thread(target=run_stream, daemon=True)
-            self.stream_thread.start()
-            
-            self.is_connected = True
-            logger.info(f"Connected to Alpaca Stream for {self.ticker}")
-            
-            # Notify client that we're connected
-            await self.send(text_data=json.dumps({
-                'type': 'connection_status',
-                'status': 'connected',
-                'message': f'Successfully connected to Alpaca stream for {self.ticker}'
-            }))
-            
+                    logger.error(f"Error processing Alpaca message: {e}")
+                    await self.send_error(f"Error processing market data: {str(e)}")
         except Exception as e:
-            logger.exception(f"Failed to connect to Alpaca: {e}")
-            await self.send_error(f"Failed to connect to Alpaca: {str(e)}")
-    
-    async def close_alpaca_connection(self):
-        """Close connection to Alpaca stream."""
-        if self.alpaca_stream and self.is_connected:
-            try:
-                logger.info(f"Closing Alpaca stream for {self.ticker}")
-                await self.alpaca_stream.stop_ws()
-                self.is_connected = False
-                logger.info(f"Closed Alpaca stream for {self.ticker}")
-            except Exception as e:
-                logger.exception(f"Error closing Alpaca stream: {e}")
-    
+            logger.error(f"Alpaca WebSocket stream error: {e}")
+            await self.send_error(f"Market data stream disconnected: {str(e)}")
+            await self.close_alpaca_connection()
+
+    async def process_alpaca_message(self, data):
+        """Process individual messages from Alpaca."""        
+        message_type = data.get('T')
+        ticker = data.get('S')
+        
+        # Handle different message types
+        if message_type == 'error':
+            # This is an error response
+            logger.error(f"Alpaca error: {data}")
+            
+        elif message_type == 'q':  # Quote message
+            # Always store the latest quotes
+            if ticker in self.market_indices:
+                self.market_indices[ticker] = {
+                    'ticker': ticker,
+                    'price': (float(data.get('bp', 0)) + float(data.get('ap', 0))) / 2,
+                    'bidPrice': float(data.get('bp', 0)),
+                    'askPrice': float(data.get('ap', 0)),
+                    'timestamp': data.get('t')
+                }
+            elif ticker == self.ticker:
+                # Store the latest quote for the requested ticker
+                self.latest_quotes[ticker] = {
+                    'type': 'quote',
+                    'ticker': ticker,
+                    'bidPrice': float(data.get('bp', 0)),
+                    'askPrice': float(data.get('ap', 0)),
+                    'bidSize': int(data.get('bs', 0)),
+                    'askSize': int(data.get('as', 0)),
+                    'timestamp': data.get('t')
+                }
+            
+            # Only send updates every 10 seconds
+            now = datetime.now()
+            if (now - self.last_quote_time).total_seconds() >= self.quote_throttle_seconds:
+                self.last_quote_time = now
+                
+                # Send any stored market indices data
+                if self.market_indices["^TNX"] and self.market_indices["^VIX"]:
+                    await self.send_market_indices()
+                
+                # Send the latest quote for the main ticker
+                if self.ticker in self.latest_quotes:
+                    await self.send(text_data=json.dumps(self.latest_quotes[self.ticker]))
+                    
+        elif message_type == 't':  # Trade message
+            pass  # We don't need to do anything with trades right now
+            
+        else:
+            # Only log unknown message types
+            if message_type not in ['success', 'subscription']:
+                logger.warning(f"Unknown message type: {message_type}")
+
+    async def send_market_indices(self):
+        """Send the current market indices data to the client."""        
+        try:
+            # Only send if we have data for both indices
+            if self.market_indices["^TNX"] and self.market_indices["^VIX"]:
+                await self.send(text_data=json.dumps({
+                    'type': 'market_indices',
+                    'us10y': {
+                        'ticker': '^TNX',
+                        'price': self.market_indices["^TNX"]["price"],
+                        'timestamp': self.market_indices["^TNX"]["timestamp"]
+                    },
+                    'vix': {
+                        'ticker': '^VIX',
+                        'price': self.market_indices["^VIX"]["price"],
+                        'timestamp': self.market_indices["^VIX"]["timestamp"]
+                    }
+                }))
+        except Exception as e:
+            logger.error(f"Error sending market indices data: {e}")
+            # Don't send error to client as this is not critical
+
+    async def keepalive(self):
+        """Send periodic keepalive messages to Alpaca."""        
+        try:
+            while True:
+                # Use the same 10-second interval as the quote throttling
+                await asyncio.sleep(self.quote_throttle_seconds)
+                if self.alpaca_ws and self.alpaca_ws.open:
+                    await self.alpaca_ws.send(json.dumps({"action": "ping"}))
+        except Exception as e:
+            logger.error(f"Keepalive task error: {e}")
+            await self.close_alpaca_connection()
+
     async def send_error(self, message):
-        """Send error message to client."""
-        logger.error(f"Sending error to client: {message}")
+        """Send error message to client."""        
+        logger.error(f"Sending error to client (ID: {self.connection_id}): {message}")
         try:
             await self.send(text_data=json.dumps({
                 'type': 'error',
@@ -225,7 +266,35 @@ class AlpacaStreamConsumer(AsyncWebsocketConsumer):
                 'timestamp': datetime.now().isoformat()
             }))
         except Exception as e:
-            logger.exception(f"Error sending error message to client: {e}")
+            logger.exception(f"Error sending error message to client (ID: {self.connection_id}): {e}")
+    
+    async def close_alpaca_connection(self):
+        """Close the Alpaca WebSocket connection."""        
+        if self.alpaca_ws:
+            try:
+                # Unsubscribe from only the ticker (not indices since they come from yfinance)
+                unsubscribe_msg = {
+                    "action": "unsubscribe",
+                    "quotes": [self.ticker]
+                }
+                await self.alpaca_ws.send(json.dumps(unsubscribe_msg))
+                
+                # Cancel keepalive task
+                if self.keepalive_task:
+                    self.keepalive_task.cancel()
+                    try:
+                        await self.keepalive_task
+                    except asyncio.CancelledError:
+                        pass
+                
+                # Close WebSocket
+                await self.alpaca_ws.close()
+                logger.info(f"Alpaca connection closed (ID: {self.connection_id})")
+            except Exception as e:
+                logger.exception(f"Error closing Alpaca connection (ID: {self.connection_id}): {e}")
+            finally:
+                self.alpaca_ws = None
+                self.keepalive_task = None
     
     @database_sync_to_async
     def get_historical_candles(self, timeframe, period, limit=1000):
@@ -262,7 +331,7 @@ class AlpacaStreamConsumer(AsyncWebsocketConsumer):
     
     async def send_historical_data(self):
         """
-        Get historical data from Alpaca API if not available in local database.
+        Get historical data from our local database.
         Calculate initial moving averages and send to client.
         """
         try:
@@ -279,46 +348,6 @@ class AlpacaStreamConsumer(AsyncWebsocketConsumer):
             # Get data from our database first
             daily_df = await self.get_historical_candles("daily", 60, limit=20)
             fivemin_df = await self.get_historical_candles("5min", 4, limit=20)
-            
-            # If data not in database, fetch from Alpaca API
-            if daily_df is None or fivemin_df is None:
-                logger.info(f"Some historical data not found in database, fetching from Alpaca API")
-                # Create API client
-                api = tradeapi.REST(api_key, api_secret, base_url='https://paper-api.alpaca.markets')
-                
-                end = datetime.now()
-                start_daily = end - timedelta(days=60)
-                start_fivemin = end - timedelta(days=3)
-                
-                # Get daily data
-                if daily_df is None:
-                    logger.info(f"Fetching daily data from Alpaca for {self.ticker}")
-                    daily_bars = api.get_barset(
-                        symbols=[self.ticker],
-                        timeframe='1D',
-                        start=start_daily.isoformat(),
-                        end=end.isoformat()
-                    )
-                    if self.ticker in daily_bars:
-                        daily_df = daily_bars[self.ticker].df
-                        logger.info(f"Received {len(daily_df)} daily bars from Alpaca")
-                    else:
-                        logger.warning(f"No daily data returned from Alpaca for {self.ticker}")
-                
-                # Get 5-minute data
-                if fivemin_df is None:
-                    logger.info(f"Fetching 5-minute data from Alpaca for {self.ticker}")
-                    fivemin_bars = api.get_barset(
-                        symbols=[self.ticker],
-                        timeframe='5Min',
-                        start=start_fivemin.isoformat(),
-                        end=end.isoformat()
-                    )
-                    if self.ticker in fivemin_bars:
-                        fivemin_df = fivemin_bars[self.ticker].df
-                        logger.info(f"Received {len(fivemin_df)} 5-minute bars from Alpaca")
-                    else:
-                        logger.warning(f"No 5-minute data returned from Alpaca for {self.ticker}")
             
             # Calculate moving averages
             logger.info(f"Calculating moving averages for {self.ticker}")
@@ -360,81 +389,56 @@ class AlpacaStreamConsumer(AsyncWebsocketConsumer):
             logger.exception(f"Error fetching historical data: {e}")
             await self.send_error(f"Error fetching historical data: {str(e)}")
     
-    async def calculate_and_send_moving_averages(self):
-        """Calculate and send updated moving averages periodically."""        
-        # This is a placeholder - in a real implementation we would keep track of
-        # received trades and recalculate moving averages only when appropriate
-        # For now, we'll rely on the initial calculations from historical data
-        pass
-    
-    async def subscribe_to_tickers(self, symbols):
-        """Subscribe to additional ticker symbols."""        
-        if not self.alpaca_stream:
-            logger.error("Cannot subscribe: Alpaca stream not initialized")
-            await self.send_error("Alpaca stream not initialized")
-            return
-        
+    async def fetch_market_indices_periodically(self):
+        """Fetch market indices data from yfinance periodically."""
         try:
-            async def quote_callback(quote):
-                try:
-                    symbol = quote.symbol
-                    logger.debug(f"Received quote update for {symbol}")
-                    
-                    # Prepare quote data for frontend
-                    quote_data = {
-                        'type': 'quote',
-                        'symbol': symbol,
-                        'bidPrice': float(quote.bid_price),
-                        'bidSize': int(quote.bid_size),
-                        'askPrice': float(quote.ask_price),
-                        'askSize': int(quote.ask_size),
-                        'timestamp': quote.timestamp.isoformat()
+            while True:
+                await self.fetch_market_indices()
+                # Wait for the specified interval before fetching again
+                await asyncio.sleep(self.indices_update_interval)
+        except asyncio.CancelledError:
+            logger.info("Market indices fetch task cancelled")
+        except Exception as e:
+            logger.error(f"Error in market indices periodic fetch: {e}")
+            
+    async def fetch_market_indices(self):
+        """Fetch market indices data from yfinance."""
+        try:
+            # Run yfinance operations in a thread pool since they are blocking
+            indices_data = await asyncio.to_thread(self._fetch_yfinance_data, ["^TNX", "^VIX"])
+            
+            if indices_data:
+                # Store the fetched data
+                for symbol, data in indices_data.items():
+                    if data is not None:
+                        self.market_indices[symbol] = {
+                            'ticker': symbol,
+                            'price': data['price'],
+                            'timestamp': data['timestamp'].isoformat()
+                        }
+                
+                # Send updated indices to client
+                await self.send_market_indices()
+                logger.debug(f"Updated market indices from yfinance: TNX={self.market_indices.get('^TNX', {}).get('price')}, VIX={self.market_indices.get('^VIX', {}).get('price')}")
+        except Exception as e:
+            logger.error(f"Error fetching market indices data: {e}")
+
+    def _fetch_yfinance_data(self, symbols):
+        """Fetch data from yfinance (runs in a separate thread)."""
+        result = {}
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                # Get the latest price data
+                history = ticker.history(period="1d")
+                
+                if not history.empty:
+                    latest = history.iloc[-1]
+                    result[symbol] = {
+                        'price': float(latest['Close']),
+                        'timestamp': datetime.now()
                     }
-                    
-                    # Send to WebSocket client
-                    await self.send(text_data=json.dumps(quote_data))
-                except Exception as e:
-                    logger.exception(f"Error handling quote update: {e}")
-                    
-            # Subscribe to trades and quotes for additional symbols
-            for symbol in symbols:
-                symbol = symbol.upper()
-                logger.info(f"Subscribing to {symbol}")
-                self.alpaca_stream.subscribe_quotes(quote_callback, symbol)
-            
-            logger.info(f"Subscribed to additional symbols: {symbols}")
-            await self.send(text_data=json.dumps({
-                'type': 'subscription_update',
-                'message': f"Successfully subscribed to: {', '.join(symbols)}",
-                'symbols': symbols
-            }))
-        except Exception as e:
-            logger.exception(f"Failed to subscribe to symbols: {e}")
-            await self.send_error(f"Failed to subscribe: {str(e)}")
-    
-    async def unsubscribe_from_tickers(self, symbols):
-        """Unsubscribe from ticker symbols."""        
-        if not self.alpaca_stream:
-            logger.error("Cannot unsubscribe: Alpaca stream not initialized")
-            await self.send_error("Alpaca stream not initialized")
-            return
+            except Exception as e:
+                logger.error(f"Error fetching data for {symbol}: {e}")
         
-        try:
-            # Unsubscribe from trades and quotes
-            for symbol in symbols:
-                symbol = symbol.upper()
-                logger.info(f"Unsubscribing from {symbol}")
-                try:
-                    self.alpaca_stream.unsubscribe_quotes(symbol)
-                except Exception as e:
-                    logger.warning(f"Error unsubscribing from {symbol}: {e}")
-            
-            logger.info(f"Unsubscribed from symbols: {symbols}")
-            await self.send(text_data=json.dumps({
-                'type': 'subscription_update',
-                'message': f"Successfully unsubscribed from: {', '.join(symbols)}",
-                'symbols': symbols
-            }))
-        except Exception as e:
-            logger.exception(f"Failed to unsubscribe from symbols: {e}")
-            await self.send_error(f"Failed to unsubscribe: {str(e)}")
+        return result

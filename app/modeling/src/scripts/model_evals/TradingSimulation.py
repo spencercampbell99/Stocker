@@ -10,7 +10,7 @@ import pytz
 from pathlib import Path
 
 # Local imports
-from OptionPricingCalculator import get_option_prices, select_best_option, simulate_option_performance
+from scripts.model_evals.OptionPricingCalculator import get_option_prices, select_best_option, simulate_option_performance
 
 # Constants
 EASTERN_TZ = pytz.timezone('US/Eastern')
