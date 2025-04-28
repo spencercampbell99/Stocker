@@ -150,7 +150,6 @@
                                     <div class="card-body">
                                         <div class="real-time-data">
                                             <div>Price: <span id="currentPrice">--</span></div>
-                                            <div>Change: <span id="priceChange">--</span></div>
                                             <div>Bid: <span id="bidPrice">--</span> x <span id="bidSize">--</span></div>
                                             <div>Ask: <span id="askPrice">--</span> x <span id="askSize">--</span></div>
                                         </div>
@@ -235,32 +234,6 @@
             }
         }
         
-        // Function to handle trades data
-        function handleTrade(trade) {
-            // Update price display
-            document.getElementById('currentPrice').textContent = `$${formatPrice(trade.price)}`;
-            
-            // Update price change
-            if (lastPrice !== null) {
-                const priceChange = trade.price - lastPrice;
-                const priceChangeElement = document.getElementById('priceChange');
-                priceChangeElement.textContent = `${priceChange > 0 ? '+' : ''}${formatPrice(priceChange)} (${priceChange > 0 ? '+' : ''}${(priceChange / lastPrice * 100).toFixed(2)}%)`;
-                
-                if (priceChange > 0) {
-                    priceChangeElement.className = 'price-up';
-                } else if (priceChange < 0) {
-                    priceChangeElement.className = 'price-down';
-                } else {
-                    priceChangeElement.className = 'price-unchanged';
-                }
-            }
-            
-            lastPrice = trade.price;
-            
-            // Update timestamp
-            document.getElementById('lastUpdateTime').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
-        }
-        
         // Function to handle quote data
         function handleQuote(quote) {
             // calculate Price from bid and ask
@@ -337,9 +310,7 @@
                 socket.onmessage = function(event) {
                     const data = JSON.parse(event.data);
                     
-                    if (data.type === 'trade') {
-                        handleTrade(data);
-                    } else if (data.type === 'quote') {
+                    if (data.type === 'quote') {
                         handleQuote(data);
                     } else if (data.type === 'ma_data') {
                         handleMovingAverages(data);

@@ -138,7 +138,6 @@ def prepare_model_features(model_metadata):
     down_threshold = model_metadata.get('thresholds', {}).get('down_threshold', 0.995)
     
     # Get the data from our DataHandler
-    today = datetime.now().strftime('%Y-%m-%d')
     one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     
     # Use the data handler to get properly formatted data

@@ -138,17 +138,26 @@ class CandleDataManager:
         
         return {'success': True, 'message': f'Successfully saved all daily VIX candles since 1990', 'count': len(vix_data)}
     
-    def get_10_year_treasury_candle_data(self):
+    def get_10_year_treasury_candle_data(self, last_week_only: bool = False):
         """
         Load daily 10-year treasury data from 2000 to present using yfinance.
+        
+        Args:
+            last_week_only: If True, only load data from the last week.
         
         Returns:
             Results of the operation as a dictionary.
         """
         import yfinance as yf
         try:
+            start = "2000-01-01"
+            
+            if last_week_only:
+                # Get the last week's date range
+                start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            
             # Load 10-year treasury data
-            treasury_data = yf.download("^TNX", start="2000-01-01", end=datetime.now().strftime("%Y-%m-%d"), interval="1d")
+            treasury_data = yf.download("^TNX", start=start, interval="1d")
             
             # Handle multi-index columns if present
             if isinstance(treasury_data.columns, pd.MultiIndex):
