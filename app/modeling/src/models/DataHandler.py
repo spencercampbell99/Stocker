@@ -3,7 +3,7 @@ import pandas as pd
 from models.SqlQueries import get_daily_move_status_query, five_min_data_for_ticker_query
 import numpy as np
 
-def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925):
+def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False):
     """Get the up/down model data from the database."""
     db = get_session()
     
@@ -28,16 +28,6 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     data_5min = pd.read_sql(five_min_query, db.connection())
     data_5min = data_5min.set_index("timestamp")
     data_5min["date"] = data_5min.index.date
-
-    # --- HL Data ---
-    hl_query = get_daily_move_status_query(
-        start_date=start_date,
-        up_threshold=up_threshold,
-        down_threshold=down_threshold,
-        ticker=ticker
-    )
-    hl_data = pd.read_sql(hl_query, db.connection())
-    hl_data['date'] = pd.to_datetime(hl_data['date']).dt.date  # Ensure date format matches
 
     # --- Moving Averages ---
     # Daily MAs
@@ -92,7 +82,7 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     data_5min = data_5min.join(slope_df, on='date', how='left')
 
     # --- Cleanup ---
-    data = data.drop(columns=['open', "volume"])
+    data = data.drop(columns=["volume"])
     data_5min = data_5min.drop(columns=["open", "high", "low", "close", "volume"])
     
     # --- Merge Data ---
@@ -100,8 +90,19 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     data_5min_agg = data_5min.groupby('date').last()  # Take last pre-market slope
     data = data.merge(data_5min_agg, on='date', how='left', suffixes=('', '_5min'))
     
-    # Merge HL data
-    data = data.merge(hl_data, on='date', how='left')
+    if not skip_move_status:
+        # --- HL Data ---
+        hl_query = get_daily_move_status_query(
+            start_date=start_date,
+            up_threshold=up_threshold,
+            down_threshold=down_threshold,
+            ticker=ticker
+        )
+        hl_data = pd.read_sql(hl_query, db.connection())
+        hl_data['date'] = pd.to_datetime(hl_data['date']).dt.date  # Ensure date format matches
+        
+        # Merge HL data
+        data = data.merge(hl_data, on='date', how='left')
     
     # --- Premarket % Change ---
     data['premarket_pct_change'] = (data['open'] - data['close'].shift(1)) / data['close'].shift(1) * 100
@@ -119,13 +120,15 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
         'daily_ma20_slope', 
         '5min_premarket_9ma_slope',
         '5min_premarket_20ma_slope',
-        'move_status',
         'premarket_pct_change',
         'last_pm_9ma_diff',
         'last_pm_20ma_diff',
         'daily_9ma_diff',
         'daily_20ma_diff',
     ])
+    
+    if not skip_move_status:
+        data = data.dropna(subset=['move_status'])
     
     # Set index to date
     data = data.set_index('date')
@@ -142,4 +145,5 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     
     return data
 
-# get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.005, down_threshold=0.995)
+# data = get_up_down_percent_model_data(start_date="2025-04-01", ticker="SPY", up_threshold=1.005, down_threshold=0.995)
+# print(data.tail())

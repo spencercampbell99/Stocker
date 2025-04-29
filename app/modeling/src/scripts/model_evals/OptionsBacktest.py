@@ -27,7 +27,7 @@ from scripts.model_evals.TradingSimulation import (
 sys.path.append(str(Path(__file__).parents[3]))
 
 # Constants
-START_DATE = "2025-01-01"
+START_DATE = "2025-03-01"
 TICKER = "SPY"
 MODEL_VERSION = "v0.1"
 
@@ -51,7 +51,7 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
         start_date=start_date,
         ticker=ticker,
         up_threshold=up_threshold,
-        down_threshold=down_threshold,
+        down_threshold=down_threshold
     )
     
     # Get VIX and US10Y data
@@ -95,8 +95,8 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     macro_data = pd.DataFrame(macro_data, columns=['date', 'vix_close', 'us10y_close', 'vix_open', 'us10y_open'])
     
     # Shift close so date of 2025-04-20 has close of 2025-04-19
-    macro_data['vix_close'] = macro_data['vix_close'].shift(1)
-    macro_data['us10y_close'] = macro_data['us10y_close'].shift(1)
+    # macro_data['vix_close'] = macro_data['vix_close'].shift(1)
+    # macro_data['us10y_close'] = macro_data['us10y_close'].shift(1)
     
     # index by date
     macro_data['date'] = pd.to_datetime(macro_data['date'])
@@ -106,7 +106,7 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     macro_data = macro_data.dropna()
     
     # merge with core data
-    data = pd.concat([data, macro_data], axis=1)
+    data = pd.merge(data, macro_data, left_index=True, right_index=True, how='left')
     
     # Get open price at 30 mins to close for each day
     query = text(f"""
@@ -200,7 +200,7 @@ def main():
         
         # Simulate options trading
         trading_results = simulate_options_trading(model, metadata, daily_data)
-        
+    
         # Display results
         display_options_trading_results(trading_results)
         

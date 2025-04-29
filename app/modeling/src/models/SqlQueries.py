@@ -11,9 +11,8 @@ def get_daily_move_status_query(start_date='2018-01-01', up_threshold=1.0075, do
                 SELECT 
                     "timestamp"::date AS date,
                     open AS open_930
-                FROM stocks_fivemincandle
+                FROM stocks_dailycandle
                 WHERE ticker = '{ticker}'
-                AND "timestamp"::time = '09:30:00'
                 AND "timestamp" >= '{start_date}'
             ),
             time_markers AS (
@@ -41,7 +40,6 @@ def get_daily_move_status_query(start_date='2018-01-01', up_threshold=1.0075, do
             )
             SELECT
                 date,
-                open_930 AS open,
                 CASE
                     WHEN first_up IS NOT NULL AND (first_down IS NULL OR first_up < first_down) THEN 2 -- Up move
                     WHEN first_down IS NOT NULL AND (first_up IS NULL OR first_down < first_up) THEN 0 -- Down move

@@ -51,6 +51,8 @@ def simulate_options_trading(model, metadata, daily_data):
         'vix_open': daily_data['vix_open'],
         'us10y_open': daily_data['us10y_open'],
         'thirty_to_close_price': daily_data['thirty_to_close_price'],
+        'day_low': daily_data['low'],
+        'day_high': daily_data['high'],
     })
     
     # Initialize trading variables
@@ -60,6 +62,10 @@ def simulate_options_trading(model, metadata, daily_data):
     balances = [balance]
     trade_dates = []
     
+    # item_to_print = daily_data[daily_data.index.strftime('%Y-%m-%d') == '2025-04-28']
+    # for item in item_to_print.iloc[0].items():
+    #     print(f"{item[0]}: {item[1]}")
+
     # Simulate trading each day
     for _, row in predictions_df.iterrows():
         date = row['date']
@@ -78,6 +84,8 @@ def simulate_options_trading(model, metadata, daily_data):
         vix_open = row['vix_open']
         us10y_open = row['us10y_open']
         thirty_to_close_price = row['thirty_to_close_price']
+        market_high = row['day_high']
+        market_low = row['day_low']
         
         # Create entry time (market open)
         entry_time = datetime.combine(date, TRADE_START_TIME)
@@ -93,8 +101,8 @@ def simulate_options_trading(model, metadata, daily_data):
         # Get option chain
         option_chain = get_option_prices(
             spy_price=market_open,
-            vix_prev_close=vix_close,
-            us10y_prev_close=us10y_close,
+            vix_prev_close=vix_open,
+            us10y_prev_close=us10y_open,
             direction=option_type
         )
 
@@ -109,39 +117,64 @@ def simulate_options_trading(model, metadata, daily_data):
         if strike is None:
             continue  # Skip if no valid option found
         
-        # (1 / 252) / 13 is 30 minutes to close for time to expire (1/13th of a trading day is 30 minutes)
-        if actual == 0:
-            # Simulate option performance
-            performance_pct = simulate_option_performance(
-                exit_ticker_price=thirty_to_close_price,
-                entry_premium=premium,
-                strike=strike,
-                us10y=us10y_open,
-                vix=vix_open,
-                direction=option_type,
-                expir_time_override = (1 / 252) / 13
-            )
-        elif actual == 2:
-            # Simulate option performance
-            performance_pct = simulate_option_performance(
-                exit_ticker_price=thirty_to_close_price,
-                entry_premium=premium,
-                strike=strike,
-                us10y=us10y_open,
-                vix=vix_open,
-                direction=option_type,
-                expir_time_override = (1 / 252) / 13
-            )
-        else:
-            performance_pct = simulate_option_performance(
-                exit_ticker_price=thirty_to_close_price,
-                entry_premium=premium,
-                strike=strike,
-                us10y=us10y_open,
-                vix=vix_open,
-                direction=option_type,
-                expir_time_override = (1 / 252) / 13
-            )
+        performance_pct = None
+        # if option_type == 'put':
+        #     if market_low < strike - premium * 1.6:
+        #         performance_pct = simulate_option_performance(
+        #             exit_ticker_price=strike - premium * 1.6,
+        #             entry_premium=premium,
+        #             strike=strike,
+        #             us10y=us10y_open,
+        #             vix=vix_open,
+        #             direction=option_type,
+        #             expir_time_override = (1 / 252) / 2 # assume mid day
+        #         )
+        # else:
+        #     if market_high > strike + premium * 1.6:
+        #         performance_pct = simulate_option_performance(
+        #             exit_ticker_price=strike + premium * 1.6,
+        #             entry_premium=premium,
+        #             strike=strike,
+        #             us10y=us10y_open,
+        #             vix=vix_open,
+        #             direction=option_type,
+        #             expir_time_override = (1 / 252) / 2 # assume mid day
+        #         )
+        
+        if not performance_pct:
+            # (1 / 252) / 13 is 30 minutes to close for time to expire (1/13th of a trading day is 30 minutes)
+            if actual == 0:
+                # Simulate option performance
+                performance_pct = simulate_option_performance(
+                    exit_ticker_price=thirty_to_close_price,
+                    entry_premium=premium,
+                    strike=strike,
+                    us10y=us10y_open,
+                    vix=vix_open,
+                    direction=option_type,
+                    expir_time_override = (1 / 252) / 13
+                )
+            elif actual == 2:
+                # Simulate option performance
+                performance_pct = simulate_option_performance(
+                    exit_ticker_price=thirty_to_close_price,
+                    entry_premium=premium,
+                    strike=strike,
+                    us10y=us10y_open,
+                    vix=vix_open,
+                    direction=option_type,
+                    expir_time_override = (1 / 252) / 13
+                )
+            else:
+                performance_pct = simulate_option_performance(
+                    exit_ticker_price=thirty_to_close_price,
+                    entry_premium=premium,
+                    strike=strike,
+                    us10y=us10y_open,
+                    vix=vix_open,
+                    direction=option_type,
+                    expir_time_override = (1 / 252) / 13
+                )
         
         def get_position_size(balance, premium):
             """

@@ -121,12 +121,13 @@ def get_latest_market_data():
     }
 
 
-def prepare_model_features(model_metadata):
+def prepare_model_features(model_metadata, override_date=None):
     """
     Prepare features for the model based on the latest market data
     
     Args:
         model_metadata: Dictionary containing model metadata
+        override_date: Optional date to override the default (today's date)
         
     Returns:
         DataFrame: DataFrame containing features for model prediction
@@ -137,21 +138,30 @@ def prepare_model_features(model_metadata):
     up_threshold = model_metadata.get('thresholds', {}).get('up_threshold', 1.005)
     down_threshold = model_metadata.get('thresholds', {}).get('down_threshold', 0.995)
     
+    target_date = datetime.strptime(override_date, '%Y-%m-%d') if override_date else datetime.now()
+    target_date_str = target_date.strftime('%Y-%m-%d')
+    
     # Get the data from our DataHandler
-    one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    start_date = (target_date - timedelta(days=60)).strftime('%Y-%m-%d')
     
     # Use the data handler to get properly formatted data
     data = get_up_down_percent_model_data(
-        start_date=one_month_ago,
+        start_date=start_date,
         ticker="SPY",
         up_threshold=up_threshold,
-        down_threshold=down_threshold
+        down_threshold=down_threshold,
+        skip_move_status=True
     )
     
-    # We only need the latest row for prediction
-    latest_data = data.iloc[-1:].copy()
+    # Get the data at date - using string comparison of dates
+    # Convert index to datetime first if it's not already, then filter by date string
+    data.index = pd.to_datetime(data.index)
+    data = data[data.index.strftime('%Y-%m-%d') == target_date_str]
     
-    return latest_data
+    # for item in data.iloc[0].items():
+    #     print(f"{item[0]}: {item[1]}")
+    
+    return data
 
 
 def make_prediction(model, data, metadata):
@@ -253,62 +263,118 @@ def select_option_trade(prediction, spy_price, vix_value, us10y_value, max_affor
     return option_info
 
 
-def get_latest_values():
+def get_latest_values(at_date=None):
     """
     Get the latest values for SPY price, VIX, and US10Y yield
-    from the database
+    from the database for the specified date
+    
+    Args:
+        at_date: Optional date to override the default (today's date)
     
     Returns:
         tuple: (spy_price, vix_value, us10y_value)
     """
-    print("Fetching latest values from database...")
-    
     from db.database import get_session
     from sqlalchemy import text
+    from datetime import datetime
+
+    # Use provided date or default to today
+    target_date = at_date if at_date else datetime.now().strftime('%Y-%m-%d')
+    print(f"Fetching values from database for date: {target_date}...")
     
     session = get_session()
     
-    # Query for latest SPY price
+    # Query for SPY price on target date (open or previous close)
     spy_query = text("""
-        SELECT close
-        FROM stocks_dailycandle
-        WHERE ticker = 'SPY'
-        ORDER BY timestamp DESC
-        LIMIT 1
+        WITH date_prices AS (
+            SELECT ticker, timestamp, open, close
+            FROM stocks_dailycandle
+            WHERE ticker = 'SPY' AND timestamp <= :target_date
+            ORDER BY timestamp DESC
+            LIMIT 2
+        )
+        SELECT 
+            CASE 
+                -- Open price from target date if available
+                WHEN EXISTS (
+                    SELECT 1 FROM date_prices 
+                    WHERE DATE(timestamp) = DATE(:target_date) AND open IS NOT NULL
+                ) THEN (
+                    SELECT open FROM date_prices 
+                    WHERE DATE(timestamp) = DATE(:target_date)
+                )
+                -- Otherwise previous day's close
+                ELSE (
+                    SELECT close FROM date_prices
+                    LIMIT 1
+                )
+            END as price
     """)
     
-    # Query for latest VIX value
+    # Similar query for VIX value
     vix_query = text("""
-        SELECT close
-        FROM stocks_dailycandle
-        WHERE ticker = 'VIX'
-        ORDER BY timestamp DESC
-        LIMIT 1
+        WITH date_prices AS (
+            SELECT ticker, timestamp, open, close
+            FROM stocks_dailycandle
+            WHERE ticker = 'VIX' AND timestamp <= :target_date
+            ORDER BY timestamp DESC
+            LIMIT 2
+        )
+        SELECT 
+            CASE 
+                WHEN EXISTS (
+                    SELECT 1 FROM date_prices 
+                    WHERE DATE(timestamp) = DATE(:target_date) AND open IS NOT NULL
+                ) THEN (
+                    SELECT open FROM date_prices 
+                    WHERE DATE(timestamp) = DATE(:target_date)
+                )
+                ELSE (
+                    SELECT close FROM date_prices
+                    LIMIT 1
+                )
+            END as price
     """)
     
-    # Query for latest US10Y yield
+    # Similar query for US10Y yield
     us10y_query = text("""
-        SELECT close
-        FROM stocks_dailycandle
-        WHERE ticker = 'US10Y'
-        ORDER BY timestamp DESC
-        LIMIT 1
+        WITH date_prices AS (
+            SELECT ticker, timestamp, open, close
+            FROM stocks_dailycandle
+            WHERE ticker = 'US10Y' AND timestamp <= :target_date
+            ORDER BY timestamp DESC
+            LIMIT 2
+        )
+        SELECT 
+            CASE 
+                WHEN EXISTS (
+                    SELECT 1 FROM date_prices 
+                    WHERE DATE(timestamp) = DATE(:target_date) AND open IS NOT NULL
+                ) THEN (
+                    SELECT open FROM date_prices 
+                    WHERE DATE(timestamp) = DATE(:target_date)
+                )
+                ELSE (
+                    SELECT close FROM date_prices
+                    LIMIT 1
+                )
+            END as price
     """)
     
     try:
         # Explicitly convert all values to float to avoid decimal.Decimal issues
-        spy_price = float(session.execute(spy_query).scalar())
-        vix_value = float(session.execute(vix_query).scalar())
-        us10y_value = float(session.execute(us10y_query).scalar())
+        spy_price = float(session.execute(spy_query, {"target_date": target_date}).scalar())
+        vix_value = float(session.execute(vix_query, {"target_date": target_date}).scalar())
+        us10y_value = float(session.execute(us10y_query, {"target_date": target_date}).scalar())
         
-        print(f"Latest SPY price: ${spy_price:.2f}")
-        print(f"Latest VIX value: {vix_value:.2f}")
-        print(f"Latest US10Y yield: {us10y_value:.2f}%")
+        print(f"SPY price: ${spy_price:.2f}")
+        print(f"VIX value: {vix_value:.2f}")
+        print(f"US10Y yield: {us10y_value:.2f}%")
         
         return spy_price, vix_value, us10y_value
     
     except Exception as e:
-        print(f"Error fetching latest values: {e}")
+        print(f"Error fetching values: {e}")
         return None, None, None
     finally:
         session.close()
@@ -320,6 +386,18 @@ def main():
         print("Running TfUpDownModel_v0.1 for Today")
         print("=" * 60)
         
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        date_to_get = input(f"Enter date to run model for (default is today {today}): ").strip()
+        if date_to_get:
+            try:
+                datetime.strptime(date_to_get, '%Y-%m-%d')
+            except ValueError:
+                print("Invalid date format. Using today's date.")
+                date_to_get = today
+        else:
+            date_to_get = today
+        
         # Step 1: Load the model and metadata
         model, metadata = load_model_and_metadata()
         
@@ -327,13 +405,13 @@ def main():
         market_data = get_latest_market_data()
         
         # Step 3: Prepare features for the model
-        model_features = prepare_model_features(metadata)
+        model_features = prepare_model_features(metadata, override_date=date_to_get)
         
         # Step 4: Make prediction
         prediction, probabilities, features_used = make_prediction(model, model_features, metadata)
         
         # Step 5: Get latest values for option pricing
-        spy_price, vix_value, us10y_value = get_latest_values()
+        spy_price, vix_value, us10y_value = get_latest_values(at_date=date_to_get)
         
         if spy_price is None or vix_value is None or us10y_value is None:
             print("Could not get latest market values. Exiting.")

@@ -67,10 +67,12 @@ class PredictionRequest(BaseModel):
     spy_price: float
     vix_value: float
     us10y_value: float
+    date: Optional[str] = None
     max_affordability: Optional[float] = 10.0
 
 class PredictionResponse(BaseModel):
     success: bool
+    date: str
     prediction: str
     prediction_class: int
     probabilities: Dict[str, float]
@@ -171,8 +173,8 @@ def load_candles(
 def get_model_data(
     date: Optional[str] = Query(None, description="Date in YYYY-MM-DD format"),
     ticker: str = Query("SPY", description="The stock ticker symbol"),
-    up_threshold: float = Query(1.0075, description="Threshold for upward price movement"),
-    down_threshold: float = Query(0.9925, description="Threshold for downward price movement"),
+    up_threshold: float = Query(1.005, description="Threshold for upward price movement"),
+    down_threshold: float = Query(0.995, description="Threshold for downward price movement"),
     api_key: APIKey = Depends(get_api_key),
 ):
     """
@@ -245,8 +247,14 @@ def predict_market(
         # Load model and metadata
         model, metadata = load_model_and_metadata()
         
+        date = request.date if request.date else None
+        
         # Prepare features for the model
-        model_features = prepare_model_features(metadata)
+        model_features = prepare_model_features(metadata, date)
+        
+        if not date:
+            # If no date is provided, use the current date
+            date = datetime.now().strftime('%Y-%m-%d')
         
         # Make prediction
         pred_class, probabilities, features_used = make_prediction(model, model_features, metadata)
@@ -266,6 +274,7 @@ def predict_market(
         
         return {
             "success": True,
+            "date": date,
             "prediction": prediction,
             "prediction_class": int(pred_class),
             "probabilities": {
@@ -280,6 +289,7 @@ def predict_market(
     except Exception as e:
         return {
             "success": False,
+            "date": "",
             "prediction": "ERROR",
             "prediction_class": -1,
             "probabilities": {"down": 0.0, "flat": 0.0, "up": 0.0},
