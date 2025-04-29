@@ -455,40 +455,14 @@
             const us10yVal = us10yPrice || parseFloat(document.getElementById('us10yValue').textContent.replace(/%/, ''));
 
             // Call the prediction API endpoint
-            const response = API.get(`/modelingestor/prediction?ticker=${ticker}&vix_price=${vixVal}&spy_price=${spyVal || 551.41}&us10y_rate=${us10yVal}`);
-            
-            // Handle unauthorized response
-            if (response.status === 401) {
-                clearStoredCredentials();
-                
-                try {
-                    await promptForCredentials();
-                    // Retry with new credentials
-                    return getPrediction();
-                } catch (authError) {
-                    throw new Error("Authentication required");
-                }
-            }
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            displayPredictionResults(data);
-            
-            // Log the prediction request to console
-            console.log(`Prediction requested for ${ticker} at ${new Date().toLocaleString()}`);
-            console.log('Prediction results:', data);
+            const response = await API.get(`modelingestor/prediction?ticker=${ticker}&vix_price=${vixVal}&spy_price=${spyVal || 548.48}&us10y_rate=${us10yVal}`);
+
+            console.log(response)
+
+            displayPredictionResults(response);
         } catch (error) {
             console.error('Error getting prediction:', error);
             alert(`Failed to get prediction: ${error.message}`);
-            
-            // Show error in prediction result area
-            const resultContainer = document.getElementById('predictionResultContainer');
-            resultContainer.style.display = 'block';
-            document.getElementById('predictionTimestamp').textContent = `Prediction time: ${new Date().toLocaleString()}`;
-            document.getElementById('predictionResult').innerHTML = `<div class="prediction-negative">Error: ${error.message}</div>`;
         } finally {
             // Reset button
             const predictionBtn = document.getElementById('getPredictionBtn');
@@ -509,7 +483,7 @@
         document.getElementById('predictionTimestamp').textContent = `Prediction time: ${predictionTime}`;
 
         if (data.prediction !== undefined) {
-            const predictionValue = parseFloat(data.prediction);
+            const predictionValue = data.prediction
             let predictionClass = 'prediction-neutral';
             let predictionText = 'Neutral';
 
@@ -517,14 +491,10 @@
                 predictionClass = 'prediction-positive';
                 predictionText = 'UP';
             } else if (predictionValue == 'DOWN') {
+                console.log('fuck you')
                 predictionClass = 'prediction-negative';
                 predictionText = 'DOWN';
-            } else {
-                predictionClass = 'prediction-neutral';
-                predictionText = 'FLAT';
             }
-
-            console.log(predictionText)
             
             // Break down data.option_trade
             // Format of {direction: "call"/"put", strike: 123.45, premium: 9.23, reason: "reasoning"}

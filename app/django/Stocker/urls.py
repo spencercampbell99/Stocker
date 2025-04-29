@@ -20,7 +20,7 @@ from django.views.generic.base import RedirectView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('modelingestor/', include('modelingestor.urls')),
+    path('api/modelingestor/', include('modelingestor.urls')),
     path('stocks/', include('stocks.urls')),
     path('alpaca/', include('AlpacaIntegration.urls')),
     path('', RedirectView.as_view(url='/stocks/', permanent=True)),
