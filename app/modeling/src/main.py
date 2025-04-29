@@ -3,8 +3,10 @@
 Stocker API Server
 """
 
+import os
 import dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Header, HTTPException, Depends, Security
+from fastapi.security.api_key import APIKeyHeader, APIKey
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -24,6 +26,25 @@ METADATA = {
     'description': 'API for stock market data and model predictions',
     'version': '0.1',
 }
+
+SECRET_KEY = os.getenv("FAST_API_SECRET_KEY", None)
+
+if SECRET_KEY is None:
+    raise ValueError("FAST_API_SECRET_KEY environment variable not set.")
+
+# Set up API key security scheme
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
+
+# Authentication dependency
+async def get_api_key(api_key: str = Security(api_key_header)):
+    if api_key == SECRET_KEY:
+        return api_key
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing API Key",
+        headers={"WWW-Authenticate": "API key required in X-API-Key header"},
+    )
 
 app = FastAPI(
     title=METADATA['title'],
@@ -57,7 +78,7 @@ class PredictionResponse(BaseModel):
     message: str = ""
 
 @app.get("/")
-def root():
+def root(api_key: APIKey = Depends(get_api_key)):
     """Root endpoint to verify the API is working."""
     return {
         "status": "online",
@@ -73,6 +94,7 @@ def load_candles(
     end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     start_time: Optional[str] = Query(None, description="Start time in HH:MM format (24h)"),
     end_time: Optional[str] = Query(None, description="End time in HH:MM format (24h)"),
+    api_key: APIKey = Depends(get_api_key),
 ):
     """
     Load candle data for a specific ticker and timeframe.
@@ -151,6 +173,7 @@ def get_model_data(
     ticker: str = Query("SPY", description="The stock ticker symbol"),
     up_threshold: float = Query(1.0075, description="Threshold for upward price movement"),
     down_threshold: float = Query(0.9925, description="Threshold for downward price movement"),
+    api_key: APIKey = Depends(get_api_key),
 ):
     """
     Get model data for a specific date or date range.
@@ -212,6 +235,7 @@ def get_model_data(
 @app.post("/api/predict", response_model=PredictionResponse)
 def predict_market(
         request: PredictionRequest,
+        api_key: APIKey = Depends(get_api_key),
     ):
     """
     Get market prediction and suggested option trade based on 
@@ -264,5 +288,5 @@ def predict_market(
         }
 
 if __name__ == "__main__":
-    PORT = 9000
+    PORT = os.getenv("PORT", 9000)
     uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=True)

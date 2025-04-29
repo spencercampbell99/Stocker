@@ -1,9 +1,12 @@
 from django.views.decorators.http import require_http_methods
 import joblib
 import tensorflow as tf
-import pandas as pd
-import numpy as np
-from stocks.models import DailyCandle, FiveMinCandle
+from modelingestor.ModelingApiConnector import ModelingApiConnector
+from django.http import JsonResponse
+import logging
+
+# Configure logging
+logger = logging.getLogger('modelingestor')
 
 @require_http_methods(["GET"])
 def get_v01_model_predictions(request):
@@ -15,10 +18,7 @@ def get_v01_model_predictions(request):
     Args:
         request (HttpRequest): The HTTP request object.
                             Should include the following query parameters:
-                            - ma9_five_min: 9-period moving average on 5-minute timeframe
-                            - ma20_five_min: 20-period moving average on 5-minute timeframe
-                            - ma9_daily: 9-period moving average on daily timeframe
-                            - ma20_daily: 20-period moving average on daily timeframe
+                            - spy_price: Current SPY price
                             - vix_price: Current VIX index price
                             - us10y_rate: Current 10-year US Treasury yield rate
 
@@ -27,60 +27,41 @@ def get_v01_model_predictions(request):
                     On success, returns status code 200 with prediction data.
                     On error, returns appropriate error status code and message.
     """
-    # Extract parameters from the request
-    ma9_five_min = request.GET.get('ma9_five_min')
-    ma20_five_min = request.GET.get('ma20_five_min')
-    ma9_daily = request.GET.get('ma9_daily')
-    ma20_daily = request.GET.get('ma20_daily')
-    vix_price = request.GET.get('vix_price')
-    us10y_rate = request.GET.get('us10y_rate')
-
-    # load last 30 five minute candles and last 30 daily candles
-    last_30_five_min_candles = FiveMinCandle.where(
-        ticker='SPY',
-    ).order_by('-timestamp')[:30]
-    last_30_daily_candles = DailyCandle.where(
-        ticker='SPY',
-    ).order_by('-timestamp')[:30]
     
-    # Conver to pandas dataframe
-    last_30_five_min_candles_df = pd.DataFrame(list(last_30_five_min_candles.values()))
-    last_30_daily_candles_df = pd.DataFrame(list(last_30_daily_candles.values()))
+    modeling_api = ModelingApiConnector()
+    spy_price = request.GET.get('spy_price', None)
+    vix_price = request.GET.get('vix_price', None)
+    us10y_rate = request.GET.get('us10y_rate', None)
+    buying_power = request.GET.get('buying_power', None)
     
-    # Invert sorts
-    last_30_five_min_candles_df = last_30_five_min_candles_df.sort_values(by='timestamp')
-    last_30_daily_candles_df = last_30_daily_candles_df.sort_values(by='timestamp')
+    if not spy_price or not vix_price or not us10y_rate:
+        logger.error("Missing required parameters: spy_price=%s, vix_price=%s, us10y_rate=%s", spy_price, vix_price, us10y_rate)
+        return JsonResponse({'error': 'spy_price, vix_price, and us10y_rate are required'}, status=400)
     
-    # --- Moving Averages ---
-    # Daily MAs
-    last_30_daily_candles_df["MA9"] = last_30_daily_candles_df["close"].rolling(window=9, min_periods=1).mean()
-    last_30_daily_candles_df["MA20"] = last_30_daily_candles_df["close"].rolling(window=20, min_periods=1).mean()
-    
-    # 5-Minute MAs (grouped by date)
-    last_30_five_min_candles_df["pm_MA9"] = last_30_five_min_candles_df['close'].transform(
-        lambda x: x.rolling(window=9, min_periods=1).mean()
-    )
-    last_30_five_min_candles_df["pm_MA20"] = last_30_five_min_candles_df['close'].transform(
-        lambda x: x.rolling(window=20, min_periods=1).mean()
-    )
-    
-    # --- Slope Calculation Function ---
-    def calculate_slope(series):
-        """Calculate slope of % changes, handling NaNs."""
-        series_clean = series.dropna()
-        if len(series_clean) < 2:
-            return np.nan
-        pct_changes = series_clean.pct_change().dropna()
-        if len(pct_changes) < 2:
-            return np.nan
-        x = np.arange(len(pct_changes))
-        y = pct_changes.values * 100  # Convert to percentage
-        return np.polyfit(x, y, 1)[0]  # Return only slope
-
-    # --- Slope Calculation ---
-    daily_ma9_slope = calculate_slope(last_30_daily_candles_df["MA9"].tail(3))
-    daily_ma20_slope = calculate_slope(last_30_daily_candles_df["MA20"].tail(5))
-    pm_ma9_slope = calculate_slope(last_30_five_min_candles_df["pm_MA9"].tail(3))
-    pm_ma20_slope = calculate_slope(last_30_five_min_candles_df["pm_MA20"].tail(3))
-    
-    
+    try:
+        spy_price = float(spy_price)
+        vix_price = float(vix_price)
+        us10y_rate = float(us10y_rate)
+        if buying_power:
+            buying_power = float(buying_power)
+            
+        results = modeling_api.get_v01_model_predictions(
+            spy_price=spy_price,
+            vix_price=vix_price,
+            us10y_rate=us10y_rate,
+            buying_power=buying_power
+        )
+        
+        print(f"Modeling API response: {results}")
+        
+        return JsonResponse({
+            'success': results['success'],
+            'prediction': results['prediction'],
+            'prediction_class': results['prediction_class'],
+            'probabilities': results['probabilities'],
+            'option_trade': results.get('option_trade', None),
+            'message': results.get('message', '')
+        })
+    except ValueError:
+        logger.error("Invalid input values: spy_price=%s, vix_price=%s, us10y_rate=%s", spy_price, vix_price, us10y_rate)
+        return JsonResponse({'error': 'Invalid input values'}, status=400)

@@ -59,6 +59,22 @@
             font-weight: bold;
             font-size: 1.1rem;
         }
+        .prediction-result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background-color: #e9f7ef;
+            border-left: 4px solid #27ae60;
+        }
+        .prediction-positive {
+            color: #27ae60;
+        }
+        .prediction-negative {
+            color: #e74c3c;
+        }
+        .prediction-neutral {
+            color: #7f8c8d;
+        }
     </style>
 </head>
 <body>
@@ -189,6 +205,30 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Prediction button and results -->
+            <div class="row mb-4">
+                <div class="col">
+                    <div class="data-container">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <h5>Stock Predictions</h5>
+                            </div>
+                            <div class="col-md-6 text-end">
+                                <button id="getPredictionBtn" class="btn btn-primary" disabled>
+                                    <i class="bi bi-graph-up"></i> Get Prediction
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div id="predictionResultContainer" style="display: none;" class="prediction-result">
+                            <h5>Prediction Results</h5>
+                            <div id="predictionTimestamp" class="mb-2">Prediction time: --</div>
+                            <div id="predictionResult"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         {% endif %}
     </div>
 
@@ -202,6 +242,11 @@
         const ticker = '{{ selected_ticker }}';
         let lastPrice = null;
         
+        // Global market indicator variables
+        let vixPrice = null;
+        let us10yPrice = null;
+        let spyPrice = null;
+
         // Function to format numbers with commas
         function formatNumber(num) {
             return new Intl.NumberFormat().format(num);
@@ -218,6 +263,7 @@
             const statusText = document.getElementById('connectionText');
             const connectBtn = document.getElementById('connectBtn');
             const disconnectBtn = document.getElementById('disconnectBtn');
+            const predictionBtn = document.getElementById('getPredictionBtn');
             
             if (connected) {
                 statusIndicator.classList.remove('status-disconnected');
@@ -225,12 +271,14 @@
                 statusText.textContent = 'Connected';
                 connectBtn.disabled = true;
                 disconnectBtn.disabled = false;
+                predictionBtn.disabled = false; // Enable prediction button when connected
             } else {
                 statusIndicator.classList.remove('status-connected');
                 statusIndicator.classList.add('status-disconnected');
                 statusText.textContent = 'Disconnected';
                 connectBtn.disabled = false;
                 disconnectBtn.disabled = true;
+                predictionBtn.disabled = true; // Disable prediction button when disconnected
             }
         }
         
@@ -243,6 +291,11 @@
             document.getElementById('bidSize').textContent = formatNumber(quote.bidSize);
             document.getElementById('askPrice').textContent = `$${formatPrice(quote.askPrice)}`;
             document.getElementById('askSize').textContent = formatNumber(quote.askSize);
+
+            // Update global spyPrice if current ticker is SPY
+            if (ticker === 'SPY') {
+                spyPrice = price;
+            }
         }
         
         // Function to handle moving average updates
@@ -257,12 +310,16 @@
         function handleMarketIndices(data) {
             // Update US 10Y Treasury yield
             if (data.us10y && data.us10y.price) {
-                document.getElementById('us10yValue').textContent = `${formatPrice(data.us10y.price)}%`;
+                const value = parseFloat(data.us10y.price);
+                document.getElementById('us10yValue').textContent = `${formatPrice(value)}%`;
+                us10yPrice = value;
             }
             
             // Update VIX
             if (data.vix && data.vix.price) {
-                document.getElementById('vixValue').textContent = formatPrice(data.vix.price);
+                const value = parseFloat(data.vix.price);
+                document.getElementById('vixValue').textContent = formatPrice(value);
+                vixPrice = value;
             }
             
             // Update timestamp
@@ -350,6 +407,113 @@
             }
         }
         
+        // Function to check if current time is between 9 AM and 10 AM
+        function isRecommendedPredictionTime() {
+            const now = new Date();
+            const hours = now.getHours();
+            return hours >= 9 && hours < 10;
+        }
+        
+        // Function to get predictions
+        async function getPrediction() {
+            if (!isRecommendedPredictionTime()) {
+                const proceed = confirm("It's recommended to get predictions between 9 AM and 10 AM for best results. Do you still want to proceed?");
+                if (!proceed) return;
+            }
+            
+            try {
+                // Show loading state
+                const predictionBtn = document.getElementById('getPredictionBtn');
+                predictionBtn.disabled = true;
+                predictionBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Loading...';
+                
+                // Use global variables if available, otherwise parse from UI elements
+                const vixVal = vixPrice || parseFloat(document.getElementById('vixValue').textContent.replace(/%/, ''));
+                const spyVal = spyPrice || parseFloat(document.getElementById('currentPrice').textContent.replace(/[$,]/g, ''));
+                const us10yVal = us10yPrice || parseFloat(document.getElementById('us10yValue').textContent.replace(/%/, ''));
+
+                // Call the prediction API endpoint
+                const response = await fetch(`/modelingestor/prediction?ticker=${ticker}&vix_price=${vixVal}&spy_price=${spyVal || 551.41}&us10y_rate=${us10yVal}`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': '{{ csrf_token }}',
+                    },
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                displayPredictionResults(data);
+                
+                // Log the prediction request to console
+                console.log(`Prediction requested for ${ticker} at ${new Date().toLocaleString()}`);
+                console.log('Prediction results:', data);
+            } catch (error) {
+                console.error('Error getting prediction:', error);
+                alert(`Failed to get prediction: ${error.message}`);
+                
+                // Show error in prediction result area
+                const resultContainer = document.getElementById('predictionResultContainer');
+                resultContainer.style.display = 'block';
+                document.getElementById('predictionTimestamp').textContent = `Prediction time: ${new Date().toLocaleString()}`;
+                document.getElementById('predictionResult').innerHTML = `<div class="prediction-negative">Error: ${error.message}</div>`;
+            } finally {
+                // Reset button
+                const predictionBtn = document.getElementById('getPredictionBtn');
+                predictionBtn.disabled = false;
+                predictionBtn.innerHTML = '<i class="bi bi-graph-up"></i> Get Prediction';
+            }
+        }
+        
+        // Function to display prediction results
+        function displayPredictionResults(data) {
+            const resultContainer = document.getElementById('predictionResultContainer');
+            resultContainer.style.display = 'block';
+
+            // Build the result HTML
+            let resultHtml = '';
+            
+            const predictionTime = new Date().toLocaleString();
+            document.getElementById('predictionTimestamp').textContent = `Prediction time: ${predictionTime}`;
+
+            if (data.prediction !== undefined) {
+                const predictionValue = parseFloat(data.prediction);
+                let predictionClass = 'prediction-neutral';
+                let predictionText = 'Neutral';
+
+                if (predictionValue == 'UP') {
+                    predictionClass = 'prediction-positive';
+                    predictionText = 'UP';
+                } else if (predictionValue == 'DOWN') {
+                    predictionClass = 'prediction-negative';
+                    predictionText = 'DOWN';
+                } else {
+                    predictionClass = 'prediction-neutral';
+                    predictionText = 'FLAT';
+                }
+
+                console.log(predictionText)
+                
+                // Break down data.option_trade
+                // Format of {direction: "call"/"put", strike: 123.45, premium: 9.23, reason: "reasoning"}
+                resultHtml += `<div>Option Trade: <span class="${predictionClass}">${data.option_trade.direction.toUpperCase()} at $${data.option_trade.strike} for $${data.option_trade.premium}</span></div>`;
+                resultHtml += `<div>Predicted Direction: <span class="${predictionClass}">${predictionText}</span></div>`;
+                resultHtml += `<div>Option Reasoning: ${data.option_trade.reason}</div>`;
+            
+                // Give data.probabilities (format of {up: 0.75, down: 0.15, flat: 0.10})
+                resultHtml += `<div>Probabilities: UP ${Math.round(data.probabilities.up * 100)}%, DOWN ${Math.round(data.probabilities.down * 100)}%, FLAT ${Math.round(data.probabilities.flat * 100)}%</div>`;
+            }
+            
+            if (data.model_version) {
+                resultHtml += `<div>Model Version: v0.1</div>`;
+            }
+            
+            document.getElementById('predictionResult').innerHTML = resultHtml;
+        }
+
         // Initialize when page loads
         document.addEventListener('DOMContentLoaded', () => {
             // Setup event handlers for connect/disconnect buttons
@@ -358,6 +522,9 @@
             
             // Setup event handler for update indices button
             document.getElementById('updateIndicesBtn').addEventListener('click', requestMarketIndicesUpdate);
+            
+            // Setup event handler for prediction button
+            document.getElementById('getPredictionBtn').addEventListener('click', getPrediction);
         });
     </script>
     {% endif %}

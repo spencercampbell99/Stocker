@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'stocks',
     'psqlextra',
+    'modelingestor',
     'AlpacaIntegration',
 ]
 
@@ -159,6 +160,14 @@ LOGGING = {
             'backupCount': 5,
             'formatter': 'verbose',
         },
+        'modelingestor_file': {
+            'level': 'DEBUG',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOGS_DIR, 'modelingestor.log'),
+            'maxBytes': 10 * 1024 * 1024,  # 10 MB
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
     },
     'loggers': {
         'django': {
@@ -173,6 +182,11 @@ LOGGING = {
         },
         'AlpacaIntegration': {
             'handlers': ['console', 'alpaca_file'],
+            'level': 'DEBUG',
+            'propagate': True,
+        },
+        'modelingestor': {
+            'handlers': ['console', 'modelingestor_file'],
             'level': 'DEBUG',
             'propagate': True,
         },
