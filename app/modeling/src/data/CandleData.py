@@ -187,8 +187,12 @@ class CandleDataManager:
         try:
             # Load data into stocks_dailycandle table
             with get_session() as session:
-                # Delete existing TNX data
-                session.query(DailyCandle).filter_by(ticker='US10Y').delete()
+                if last_week_only:
+                    # Delete existing TNX data for the last week
+                    session.query(DailyCandle).filter_by(ticker='US10Y').filter(DailyCandle.timestamp >= start).delete()
+                else:
+                    # Delete existing TNX data
+                    session.query(DailyCandle).filter_by(ticker='US10Y').delete()
                 
                 # Insert TNX data into the database with consistent column ordering
                 treasury_data = treasury_data.rename(columns={'Date': 'timestamp'})
