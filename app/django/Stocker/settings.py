@@ -47,9 +47,11 @@ INSTALLED_APPS = [
     'psqlextra',
     'modelingestor',
     'AlpacaIntegration',
+    'common',
 ]
 
 MIDDLEWARE = [
+    'common.middleware.basic_auth.BasicAuthMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -228,3 +230,6 @@ ALPACA_API_KEY = os.environ.get('ALPACA_API_KEY')
 ALPACA_API_SECRET = os.environ.get('ALPACA_SECRET_KEY')
 ALPACA_API_BASE_URL = os.environ.get('ALPACA_API_BASE_URL', 'https://paper-api.alpaca.markets')
 ALPACA_DATA_FEED = os.environ.get('ALPACA_DATA_FEED', 'iex')
+
+BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'admin')
+BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', 'password')

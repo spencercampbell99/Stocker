@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{% block title %}Stock Price Tracker{% endblock %}</title>
+        
+        <!-- Bootstrap CSS -->
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <!-- Bootstrap Icons -->
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+        
+        {% block extra_css %}{% endblock %}
+
+        <script>
+            // Authentication handling functions
+            let authCredentials = null;
+            
+            function getStoredCredentials() {
+                // Try to get credentials from localStorage
+                const storedCredentials = localStorage.getItem('stockerAuthCredentials');
+                if (storedCredentials) {
+                    try {
+                        return JSON.parse(storedCredentials);
+                    } catch (e) {
+                        console.error("Failed to parse stored credentials:", e);
+                        localStorage.removeItem('stockerAuthCredentials');
+                    }
+                }
+                return null;
+            }
+            
+            function setStoredCredentials(username, password) {
+                localStorage.setItem('stockerAuthCredentials', JSON.stringify({ username, password }));
+            }
+            
+            function clearStoredCredentials() {
+                localStorage.removeItem('stockerAuthCredentials');
+                authCredentials = null;
+            }
+            
+            function getAuthHeader() {
+                if (!authCredentials) {
+                    authCredentials = getStoredCredentials();
+                }
+                
+                if (authCredentials) {
+                    return 'Basic ' + btoa(authCredentials.username + ':' + authCredentials.password);
+                }
+                
+                return null;
+            }
+            
+            function promptForCredentials() {
+                return new Promise((resolve, reject) => {
+                    // Create modal if it doesn't exist
+                    let modal = document.getElementById('authModal');
+                    if (!modal) {
+                        const modalHtml = `
+                            <div class="modal fade" id="authModal" tabindex="-1" aria-labelledby="authModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title" id="authModalLabel">Authentication Required</h5>
+                                        </div>
+                                        <div class="modal-body">
+                                            <form id="authForm">
+                                                <div class="mb-3">
+                                                    <label for="username" class="form-label">Username</label>
+                                                    <input type="text" class="form-control" id="username" required>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label for="password" class="form-label">Password</label>
+                                                    <input type="password" class="form-control" id="password" required>
+                                                </div>
+                                                <div class="mb-3 form-check">
+                                                    <input type="checkbox" class="form-check-input" id="rememberMe" checked>
+                                                    <label class="form-check-label" for="rememberMe">Remember me</label>
+                                                </div>
+                                                <div id="authError" class="alert alert-danger" style="display: none;"></div>
+                                            </form>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-primary" id="submitAuth">Login</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        const modalContainer = document.createElement('div');
+                        modalContainer.innerHTML = modalHtml.trim();
+                        document.body.appendChild(modalContainer.firstChild);
+                        modal = document.getElementById('authModal');
+                    }
+                    
+                    // Initialize Bootstrap modal
+                    const bsModal = new bootstrap.Modal(modal);
+                    
+                    // Set up form submission
+                    const submitBtn = document.getElementById('submitAuth');
+                    const handleSubmit = () => {
+                        const username = document.getElementById('username').value;
+                        const password = document.getElementById('password').value;
+                        const rememberMe = document.getElementById('rememberMe').checked;
+                        
+                        if (username && password) {
+                            if (rememberMe) {
+                                setStoredCredentials(username, password);
+                            }
+                            
+                            authCredentials = { username, password };
+                            bsModal.hide();
+                            resolve(authCredentials);
+                        } else {
+                            document.getElementById('authError').textContent = "Please enter both username and password";
+                            document.getElementById('authError').style.display = "block";
+                        }
+                    };
+                    
+                    submitBtn.addEventListener('click', handleSubmit);
+                    
+                    document.getElementById('authForm').addEventListener('submit', (e) => {
+                        e.preventDefault();
+                        handleSubmit();
+                    });
+                    
+                    // Clear form when modal is hidden
+                    modal.addEventListener('hidden.bs.modal', () => {
+                        document.getElementById('authError').style.display = "none";
+                        submitBtn.removeEventListener('click', handleSubmit);
+                        reject(new Error("Authentication cancelled"));
+                    });
+                    
+                    // Show the modal
+                    bsModal.show();
+                });
+            }
+            
+            // Get CSRF token from cookies
+            function getCSRFToken() {
+                const cookieValue = document.cookie
+                  .split('; ')
+                  .find(row => row.startsWith('csrftoken='))
+                  ?.split('=')[1];
+                return cookieValue;
+            }
+
+            // API client with auth handling
+            const API = {
+                baseUrl: "/api/",
+            
+                request: async function(endpoint, options = {}) {
+                    const url = this.baseUrl + endpoint;
+            
+                    let defaultHeaders = {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": getCSRFToken(),
+                    };
+                    
+                    // Add authentication header if available
+                    const authHeader = getAuthHeader();
+                    if (authHeader) {
+                        defaultHeaders["Authorization"] = authHeader;
+                    }
+            
+                    const config = {
+                        method: options.method || "GET",
+                        headers: {...defaultHeaders, ...(options.headers || {})},
+                        body: options.body ? JSON.stringify(options.body) : undefined,
+                        credentials: "same-origin",
+                    };
+            
+                    try {
+                        let response = await fetch(url, config);
+                        
+                        // Handle 401 Unauthorized
+                        if (response.status === 401) {
+                            // Try to clear and prompt for new credentials
+                            clearStoredCredentials();
+                            
+                            try {
+                                await promptForCredentials();
+                                
+                                // Update auth header and retry
+                                config.headers["Authorization"] = getAuthHeader();
+                                response = await fetch(url, config);
+                            } catch (authError) {
+                                throw new Error("Authentication required");
+                            }
+                        }
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            throw new Error(`Error ${response.status}: ${errorText}`);
+                        }
+            
+                        if (response.headers.get('content-type')?.includes('application/json')) {
+                            return response.json();
+                        } else {
+                            return response.text();
+                        }
+                    } catch (error) {
+                        console.error("API request failed:", error);
+                        throw error;
+                    }
+                },
+            
+                get: function(endpoint, options = {}) {
+                    return this.request(endpoint, {...options, method: "GET"});
+                },
+            
+                post: function(endpoint, body, options = {}) {
+                    return this.request(endpoint, {...options, method: "POST", body});
+                },
+            
+                put: function(endpoint, body, options = {}) {
+                    return this.request(endpoint, {...options, method: "PUT", body});
+                },
+            
+                delete: function(endpoint, options = {}) {
+                    return this.request(endpoint, {...options, method: "DELETE"});
+                }
+            };
+            
+            // Check auth on page load and show auth modal if needed
+            document.addEventListener('DOMContentLoaded', async function() {
+                // Try to get stored credentials
+                const storedCredentials = getStoredCredentials();
+                
+                if (!storedCredentials) {
+                    try {
+                        await promptForCredentials();
+                    } catch (e) {
+                        console.error("Failed to authenticate:", e);
+                    }
+                }
+            });
+        </script>
+        {% block extra_head %}{% endblock %}
+    </head>
+    
+    <body>
+        {% block body %}
+            <div class="container mt-4">
+                {% block content %}{% endblock content %}
+            </div>
+        {% endblock %}
+        
+        <!-- Bootstrap Bundle with Popper -->
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+        {% block extra_scripts %}{% endblock %}
+    </body>
+</html>
