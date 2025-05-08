@@ -140,47 +140,113 @@ class CandleDataManager:
     
     def get_10_year_treasury_candle_data(self, last_week_only: bool = False):
         """
-        Load daily 10-year treasury data from 2000 to present using yfinance.
+        Load daily 10-year treasury data using FRED for historical data and yfinance for recent data.
         
         Args:
-            last_week_only: If True, only load data from the last week.
+            last_week_only: If True, only load data from the last week using yfinance.
         
         Returns:
             Results of the operation as a dictionary.
         """
-        import yfinance as yf
         try:
-            start = "2000-01-01"
+            import pandas as pd
+            from datetime import datetime, timedelta
             
             if last_week_only:
+                # For last week only, use yfinance since it's more up-to-date than FRED
+                import yfinance as yf
+                import time
+                import random
+                
                 # Get the last week's date range
                 start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-            
-            # Load 10-year treasury data
-            treasury_data = yf.download("^TNX", start=start, interval="1d")
-            
-            # Handle multi-index columns if present
-            if isinstance(treasury_data.columns, pd.MultiIndex):
-                # Get the second level which contains actual column names
-                treasury_data.columns = treasury_data.columns.get_level_values(0)
-            
-            # Standard column renaming
-            treasury_data = treasury_data.rename(columns={'Close': 'close', 'Open': 'open', 'High': 'high', 'Low': 'low'})
-            
-            # Reset index to get timestamp as a column
-            treasury_data.reset_index(inplace=True)
-            
-            # Add 00:00:00 to the date
-            treasury_data['Date'] = pd.to_datetime(treasury_data['Date'].dt.strftime('%Y-%m-%d 00:00:00'))
-            
-            # Add ticker
-            treasury_data['ticker'] = 'US10Y'
-            
-            # Ensure volume column exists (might be missing or named differently)
-            if 'Volume' in treasury_data.columns:
-                treasury_data.rename(columns={'Volume': 'volume'}, inplace=True)
-            elif 'volume' not in treasury_data.columns:
-                treasury_data['volume'] = 0
+                end = datetime.now().strftime("%Y-%m-%d")
+                
+                # Add retry logic with exponential backoff for yfinance
+                max_retries = 5
+                retry_count = 0
+                treasury_data = None
+                
+                while retry_count < max_retries:
+                    try:
+                        # Load 10-year treasury data
+                        treasury_data = yf.download("^TNX", start=start, end=end, interval="1d")
+                        
+                        # If successful, break out of the retry loop
+                        if not treasury_data.empty:
+                            break
+                            
+                    except Exception as download_error:
+                        print(f"Attempt {retry_count + 1} failed: {download_error}")
+                        
+                    # Exponential backoff with jitter
+                    sleep_time = (2 ** retry_count) + random.uniform(0, 1)
+                    print(f"Retrying in {sleep_time:.2f} seconds...")
+                    time.sleep(sleep_time)
+                    retry_count += 1
+                
+                if treasury_data is None or treasury_data.empty:
+                    return {'success': False, 'message': 'No data found for 10-year treasury after multiple attempts.'}
+                
+                # Handle multi-index columns if present
+                if isinstance(treasury_data.columns, pd.MultiIndex):
+                    treasury_data.columns = treasury_data.columns.get_level_values(0)
+                
+                # Standard column renaming for yfinance data
+                treasury_data = treasury_data.rename(columns={'Close': 'close', 'Open': 'open', 'High': 'high', 'Low': 'low'})
+                
+                # Reset index to get timestamp as a column
+                treasury_data.reset_index(inplace=True)
+                
+                # Add 00:00:00 to the date
+                treasury_data['Date'] = pd.to_datetime(treasury_data['Date'].dt.strftime('%Y-%m-%d 00:00:00'))
+                treasury_data = treasury_data.rename(columns={'Date': 'timestamp'})
+                
+                # Add ticker
+                treasury_data['ticker'] = 'US10Y'
+                
+                # Ensure volume column exists
+                if 'Volume' in treasury_data.columns:
+                    treasury_data.rename(columns={'Volume': 'volume'}, inplace=True)
+                elif 'volume' not in treasury_data.columns:
+                    treasury_data['volume'] = 0
+                
+            else:
+                # For historical data, use FRED which is more reliable for long-term data
+                import pandas_datareader.data as web
+                
+                start = "2000-01-01"
+                
+                # Load 10-year treasury data from FRED
+                # DGS10 is the 10-Year Treasury Constant Maturity Rate
+                treasury_data = web.DataReader('DGS10', 'fred', start=start)
+                
+                # Check if data is empty
+                if treasury_data.empty:
+                    return {'success': False, 'message': 'No data found for 10-year treasury.'}
+                
+                # FRED data only includes the close price, so we'll set all OHLC values to this value
+                treasury_data['open'] = treasury_data['DGS10']
+                treasury_data['high'] = treasury_data['DGS10']
+                treasury_data['low'] = treasury_data['DGS10']
+                treasury_data['close'] = treasury_data['DGS10']
+                treasury_data['volume'] = 0  # No volume data for Treasury
+                
+                # Drop the original column
+                treasury_data = treasury_data.drop('DGS10', axis=1)
+                
+                # Reset index to get timestamp as a column
+                treasury_data.reset_index(inplace=True)
+                
+                # Format the date
+                treasury_data['DATE'] = pd.to_datetime(treasury_data['DATE'].dt.strftime('%Y-%m-%d 00:00:00'))
+                treasury_data = treasury_data.rename(columns={'DATE': 'timestamp'})
+                
+                # Add ticker
+                treasury_data['ticker'] = 'US10Y'
+                
+                # Handle NaN values (weekends/holidays)
+                treasury_data = treasury_data.dropna()
         except Exception as e:
             return {'success': False, 'message': f"Error loading 10-year treasury data: {e}"}
         
@@ -188,14 +254,14 @@ class CandleDataManager:
             # Load data into stocks_dailycandle table
             with get_session() as session:
                 if last_week_only:
-                    # Delete existing TNX data for the last week
-                    session.query(DailyCandle).filter_by(ticker='US10Y').filter(DailyCandle.timestamp >= start).delete()
+                    # Delete existing treasury data for the last week
+                    start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                    session.query(DailyCandle).filter_by(ticker='US10Y').filter(DailyCandle.timestamp >= start_date).delete()
                 else:
-                    # Delete existing TNX data
+                    # Delete existing treasury data
                     session.query(DailyCandle).filter_by(ticker='US10Y').delete()
                 
-                # Insert TNX data into the database with consistent column ordering
-                treasury_data = treasury_data.rename(columns={'Date': 'timestamp'})
+                # Insert treasury data into the database with consistent column ordering
                 treasury_data = treasury_data[['ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
                 
                 session.bulk_insert_mappings(DailyCandle, treasury_data.to_dict(orient='records'))
@@ -205,7 +271,7 @@ class CandleDataManager:
         except Exception as e:
             return {'success': False, 'message': f"Error saving 10-year treasury data: {e}"}
         
-        return {'success': True, 'message': f'Successfully saved all daily 10-year treasury candles since 2000', 'count': len(treasury_data)}
+        return {'success': True, 'message': f'Successfully saved {"weekly" if last_week_only else "all"} daily 10-year treasury candles', 'count': len(treasury_data)}
     
     def get_candle_data(self, 
                        ticker: str, 

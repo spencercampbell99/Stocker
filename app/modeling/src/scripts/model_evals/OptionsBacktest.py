@@ -94,6 +94,8 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     # Convert to DataFrame
     macro_data = pd.DataFrame(macro_data, columns=['date', 'vix_close', 'us10y_close', 'vix_open', 'us10y_open'])
     
+    print(macro_data.tail())
+    
     # Shift close so date of 2025-04-20 has close of 2025-04-19
     # macro_data['vix_close'] = macro_data['vix_close'].shift(1)
     # macro_data['us10y_close'] = macro_data['us10y_close'].shift(1)
@@ -135,6 +137,8 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     for col in data.columns:
         if col not in ['date', 'ticker']:
             data[col] = pd.to_numeric(data[col], errors='coerce')
+    
+    print(data.tail())
     
     return data
 

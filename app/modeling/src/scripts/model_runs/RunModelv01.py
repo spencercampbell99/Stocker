@@ -113,7 +113,7 @@ def get_latest_market_data():
     
     # Get US10Y daily candles
     # Since US10Y is manually loaded, we'll load it all and filter
-    candle_manager.get_10_year_treasury_candle_data()
+    candle_manager.get_10_year_treasury_candle_data(last_week_only=True)
     
     return {
         'spy_daily': spy_daily,
@@ -121,7 +121,7 @@ def get_latest_market_data():
     }
 
 
-def prepare_model_features(model_metadata, override_date=None):
+def prepare_model_features(model_metadata, override_date=None, open_override=None):
     """
     Prepare features for the model based on the latest market data
     
@@ -150,7 +150,7 @@ def prepare_model_features(model_metadata, override_date=None):
         ticker="SPY",
         up_threshold=up_threshold,
         down_threshold=down_threshold,
-        skip_move_status=True
+        skip_move_status=True,
     )
     
     # Get the data at date - using string comparison of dates
