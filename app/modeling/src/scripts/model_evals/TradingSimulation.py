@@ -38,29 +38,32 @@ def simulate_options_trading(model, metadata, daily_data):
     X_scaled = scaler.transform(X)
     y_pred_proba = model.predict(X_scaled, verbose=0)
     y_pred = np.argmax(y_pred_proba, axis=1)
+    y_pred_no_neutral = np.argmax(y_pred_proba[:, [0, 2]], axis=1)
     
     # Create predictions DataFrame
     predictions_df = pd.DataFrame({
         'date': daily_data.index,
         'actual': daily_data['move_status'],
         'prediction': y_pred,
+        'prediction_no_neutral': y_pred_no_neutral,
         'open': daily_data['open'],
         'close': daily_data['close'],  # Make sure we have close price from daily data
         'vix_close': daily_data['vix_close'],
         'us10y_close': daily_data['us10y_close'],
         'vix_open': daily_data['vix_open'],
         'us10y_open': daily_data['us10y_open'],
-        'thirty_to_close_price': daily_data['thirty_to_close_price'],
+        'four_fifteen_price': daily_data['four_fifteen_price'],
         'day_low': daily_data['low'],
         'day_high': daily_data['high'],
     })
     
     # Initialize trading variables
     trades = []
-    initial_balance = 1000.0
+    initial_balance = 1000
     balance = initial_balance
     balances = [balance]
     trade_dates = []
+    neutral_count = 0
     
     # item_to_print = daily_data[daily_data.index.strftime('%Y-%m-%d') == '2025-04-28']
     # for item in item_to_print.iloc[0].items():
@@ -71,10 +74,12 @@ def simulate_options_trading(model, metadata, daily_data):
         date = row['date']
         prediction = row['prediction']
         actual = row['actual']
-        
+
         # Skip neutral predictions
         if prediction == 1:
-            continue
+            neutral_count += 1
+            prediction = row['prediction_no_neutral']
+            # continue
             
         # Get market prices
         market_open = row['open']
@@ -83,7 +88,7 @@ def simulate_options_trading(model, metadata, daily_data):
         us10y_close = row['us10y_close']
         vix_open = row['vix_open']
         us10y_open = row['us10y_open']
-        thirty_to_close_price = row['thirty_to_close_price']
+        four_fifteen_price = row['four_fifteen_price']
         market_high = row['day_high']
         market_low = row['day_low']
         
@@ -146,34 +151,34 @@ def simulate_options_trading(model, metadata, daily_data):
             if actual == 0:
                 # Simulate option performance
                 performance_pct = simulate_option_performance(
-                    exit_ticker_price=thirty_to_close_price,
+                    exit_ticker_price=four_fifteen_price,
                     entry_premium=premium,
                     strike=strike,
                     us10y=us10y_open,
                     vix=vix_open,
                     direction=option_type,
-                    expir_time_override = (1 / 252) / 13
+                    expir_time_override = 0
                 )
             elif actual == 2:
                 # Simulate option performance
                 performance_pct = simulate_option_performance(
-                    exit_ticker_price=thirty_to_close_price,
+                    exit_ticker_price=four_fifteen_price,
                     entry_premium=premium,
                     strike=strike,
                     us10y=us10y_open,
                     vix=vix_open,
                     direction=option_type,
-                    expir_time_override = (1 / 252) / 13
+                    expir_time_override = 0
                 )
             else:
                 performance_pct = simulate_option_performance(
-                    exit_ticker_price=thirty_to_close_price,
+                    exit_ticker_price=four_fifteen_price,
                     entry_premium=premium,
                     strike=strike,
                     us10y=us10y_open,
                     vix=vix_open,
                     direction=option_type,
-                    expir_time_override = (1 / 252) / 13
+                    expir_time_override = 0
                 )
         
         def get_position_size(balance, premium):
@@ -197,6 +202,7 @@ def simulate_options_trading(model, metadata, daily_data):
         
         # Calculate position and update balance
         position_size = get_position_size(balance, premium)
+        
         dollar_return = position_size * performance_pct
         new_balance = balance + dollar_return
         
@@ -213,7 +219,7 @@ def simulate_options_trading(model, metadata, daily_data):
             'us10y_close': us10y_close,
             'premium': premium,
             'entry_price': market_open,
-            'rough_exit_price': thirty_to_close_price,
+            'rough_exit_price': four_fifteen_price,
             'close_price': market_close,
             'position_size': position_size,
             'performance_pct': performance_pct * 100,
@@ -244,7 +250,8 @@ def simulate_options_trading(model, metadata, daily_data):
         'win_count': win_count,
         'loss_count': total_trades - win_count,
         'total_trades': total_trades,
-        'win_rate': win_rate
+        'win_rate': win_rate,
+        'neutral_count': neutral_count,
     }
 
 def plot_options_trading_results(trading_results, save_path=None):
@@ -330,6 +337,7 @@ def display_options_trading_results(trading_results):
     print(f"Win Rate: {trading_results['win_rate']:.2%}")
     print(f"Wins: {trading_results['win_count']}")
     print(f"Losses: {trading_results['loss_count']}")
+    print(f"Neutral Predictions: {trading_results['neutral_count']}")
     
     # Show sample of trades
     print("\nSample of Recent Trades:")
