@@ -164,17 +164,24 @@ def simulate_option_performance(exit_ticker_price, entry_premium, strike, us10y,
         Percentage return on option
     """
 
-    # Calculate option price
-    close_price = calculate_black_scholes(
-        S=exit_ticker_price,
-        K=strike,
-        T= expir_time_override if expir_time_override else 1 / 252,
-        sigma=vix / 100,
-        r=us10y / 100,
-        option_type=direction,
-    )
+    if expir_time_override == 0:
+        if direction == "call":
+            close_price = exit_ticker_price - strike
+        else:
+            close_price = strike - exit_ticker_price
+    else:
+        # Calculate option price
+        close_price = calculate_black_scholes(
+            S=exit_ticker_price,
+            K=strike,
+            T= expir_time_override if expir_time_override else 1 / 252,
+            sigma=vix / 100,
+            r=us10y / 100,
+            option_type=direction,
+        )
     
     return close_price / entry_premium - 1.0
+
 
 # prices = get_option_prices(
 #     spy_price=546.65,
