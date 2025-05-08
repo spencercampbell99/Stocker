@@ -27,7 +27,7 @@ from scripts.model_evals.TradingSimulation import (
 sys.path.append(str(Path(__file__).parents[3]))
 
 # Constants
-START_DATE = "2025-03-01"
+START_DATE = "2025-01-01"
 TICKER = "SPY"
 MODEL_VERSION = "v0.1"
 
@@ -108,28 +108,28 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     # merge with core data
     data = pd.merge(data, macro_data, left_index=True, right_index=True, how='left')
     
-    # Get open price at 30 mins to close for each day
+    # Get open price for 4:15 every day
     query = text(f"""
         SELECT
             "timestamp"::date as date,
-            open
+            close
         FROM
-            stocks_thirtymincandle
+            stocks_fivemincandle
         WHERE
             ticker = '{ticker}'
             AND "timestamp" >= '{start_date}'
-            AND "timestamp"::time = '15:30:00'
+            AND "timestamp"::time = '14:10:00'
     """)
     
-    thirty_to_close_data = db.execute(query).fetchall()
+    four_fifteen_close_data = db.execute(query).fetchall()
     db.close()
     
     # convert to DataFrame and concat
-    thirty_to_close_data = pd.DataFrame(thirty_to_close_data, columns=['date', 'thirty_to_close_price'])
-    thirty_to_close_data['date'] = pd.to_datetime(thirty_to_close_data['date'])
-    thirty_to_close_data.set_index('date', inplace=True)
+    four_fifteen_close_data = pd.DataFrame(four_fifteen_close_data, columns=['date', 'four_fifteen_price'])
+    four_fifteen_close_data['date'] = pd.to_datetime(four_fifteen_close_data['date'])
+    four_fifteen_close_data.set_index('date', inplace=True)
     
-    data = pd.concat([data, thirty_to_close_data], axis=1)
+    data = pd.concat([data, four_fifteen_close_data], axis=1)
     
     # make sure all data columns are float
     for col in data.columns:
