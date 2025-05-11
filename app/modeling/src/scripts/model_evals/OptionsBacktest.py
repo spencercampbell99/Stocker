@@ -27,7 +27,7 @@ from scripts.model_evals.TradingSimulation import (
 sys.path.append(str(Path(__file__).parents[3]))
 
 # Constants
-START_DATE = "2025-01-01"
+START_DATE = "2024-01-01"
 TICKER = "SPY"
 MODEL_VERSION = "v0.1"
 

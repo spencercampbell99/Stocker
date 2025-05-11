@@ -250,7 +250,7 @@ def predict_market(
         date = request.date if request.date else None
         
         # Prepare features for the model
-        model_features = prepare_model_features(metadata, override_date=date)
+        model_features = prepare_model_features(metadata, override_date=date, open_override=request.spy_price)
         
         if not date:
             # If no date is provided, use the current date

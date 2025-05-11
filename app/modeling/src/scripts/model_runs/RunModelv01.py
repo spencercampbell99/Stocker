@@ -151,6 +151,7 @@ def prepare_model_features(model_metadata, override_date=None, open_override=Non
         up_threshold=up_threshold,
         down_threshold=down_threshold,
         skip_move_status=True,
+        open_override=open_override,
     )
     
     # Get the data at date - using string comparison of dates

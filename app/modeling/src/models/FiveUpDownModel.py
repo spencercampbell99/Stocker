@@ -5,7 +5,7 @@ from sklearn.metrics import classification_report
 import pandas as pd
 import tensorflow as tf
 
-start_date = "2019-01-01"
+start_date = "2017-01-01"
 up_threshold = 1.005
 down_threshold = 0.995
 
@@ -32,7 +32,7 @@ features = [
 target = 'move_status'
 
 # Time-based split
-split_date = pd.to_datetime("2024-01-01").date()
+split_date = pd.to_datetime("2022-01-01").date()
 train_data = final_data[final_data.index < split_date]
 test_data = final_data[final_data.index >= split_date]
 
@@ -123,7 +123,7 @@ save = True
 
 if save:
     import joblib
-    model_version = "v0.1"
+    model_version = "v0.2"
     model.save(f"saved_models/TfUpDownModel_{model_version}.h5")
     
     additonal_data = {

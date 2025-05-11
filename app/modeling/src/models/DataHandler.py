@@ -3,11 +3,10 @@ import pandas as pd
 from models.SqlQueries import get_daily_move_status_query, five_min_data_for_ticker_query
 import numpy as np
 
-def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False):
-    """Get the up/down model data from the database."""
-    db = get_session()
-    
-    # --- Daily Data ---
+db = get_session()
+
+def get_daily_data_for_ticker(ticker, start_date):
+    """Get daily data for a specific ticker from the database."""
     daily_query = db.query(DailyCandle).filter(
         DailyCandle.ticker == ticker,
         DailyCandle.timestamp >= start_date
@@ -17,8 +16,10 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     data = data.set_index("timestamp")
     data = data.drop(columns=["id", "ticker"])
     data["date"] = data.index.date
+    return data
 
-    # --- 5-Minute Data ---
+def get_five_min_data_for_ticker(ticker, start_date):
+    """Get 5-minute data for a specific ticker from the database."""
     five_min_query = five_min_data_for_ticker_query(
         ticker=ticker, 
         start_date=start_date, 
@@ -28,6 +29,101 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     data_5min = pd.read_sql(five_min_query, db.connection())
     data_5min = data_5min.set_index("timestamp")
     data_5min["date"] = data_5min.index.date
+    return data_5min
+
+def calculate_slope(series):
+    """Calculate slope of % changes, handling NaNs."""
+    series_clean = series.dropna()
+    if len(series_clean) < 2:
+        return np.nan
+    pct_changes = series_clean.pct_change().dropna()
+    if len(pct_changes) < 2:
+        return np.nan
+    x = np.arange(len(pct_changes))
+    y = pct_changes.values * 100  # Convert to percentage
+    return np.polyfit(x, y, 1)[0]  # Return only slope
+
+def calculate_realized_volatility(series, n):
+    """Calculate realized volatility of a series
+    
+    Formula: 100 * sqrt((252 / n) * summation 1 -> n of R^2)
+    
+    where R = ln(Pt / Pt-1)
+    and Pt is the price at time t.
+    
+    Args:
+        series (pd.Series): The series to calculate volatility for.
+        n (int): The number of periods to use for the calculation.
+    """
+    log_returns = np.log(series / series.shift(1))
+    squared_returns = log_returns ** 2
+    realized_volatility = np.sqrt((252 / n) * squared_returns.rolling(window=n).sum())
+    return realized_volatility * 100
+
+def calculate_bollinger_band_position(series, n, clip_values=True):
+    """Calculate the position of price within Bollinger Bands.
+    
+    This returns a normalized value where:
+    - Values below -1 indicate price is below the lower band
+    - Values between -1 and 1 indicate price is between bands
+    - Values above 1 indicate price is above the upper band
+    
+    Args:
+        series (pd.Series): Price series (typically close prices)
+        n (int): The number of periods for the moving average
+        clip_values (bool): Whether to clip values to [-1, 1] range
+        
+    Returns:
+        pd.Series: Bollinger Band position values
+    """
+    # Calculate bands as before
+    middle_band = series.rolling(window=n).mean()
+    std_dev = series.rolling(window=n).std()
+    upper_band = middle_band + (2 * std_dev)
+    lower_band = middle_band - (2 * std_dev)
+    
+    band_width = upper_band - lower_band
+    band_width = band_width.replace(0, np.nan)
+    
+    position = (series - middle_band) / (0.5 * band_width)
+    
+    if clip_values:
+        position = position.clip(-1, 1)
+    
+    return position
+
+def calculate_average_true_range(data, n):
+    """Calculate the Average True Range (ATR) for a given data series.
+    
+    Formula: ATR = (ATR(t-1) * (n-1) + TR(t)) / n
+    where TR = max(high - low, abs(high - close(t-1)), abs(low - close(t-1)))
+    
+    Args:
+        data (pd.DataFrame): DataFrame containing 'high', 'low', and 'close' columns.
+        n (int): The number of periods to use for the calculation.
+        
+    Returns:
+        pd.Series: The ATR values.
+    """
+    raise NotImplementedError("This function is not implemented yet.")
+    
+    high_low = data['high'] - data['low']
+    high_prev_close = np.abs(data['high'] - data['close'].shift(1))
+    low_prev_close = np.abs(data['low'] - data['close'].shift(1))
+    
+    true_range = pd.concat([high_low, high_prev_close, low_prev_close], axis=1).max(axis=1)
+    
+    atr = true_range.rolling(window=n).mean()
+    return atr
+
+def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False, open_override=None):
+    """Get the up/down model data from the database."""
+
+    # --- Daily Data ---
+    data = get_daily_data_for_ticker(ticker, start_date)
+
+    # --- 5-Minute Data ---
+    data_5min = get_five_min_data_for_ticker(ticker, start_date)
 
     # --- Moving Averages ---
     # Daily MAs
@@ -42,27 +138,11 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
         lambda x: x.rolling(window=20, min_periods=1).mean()
     )
 
-    # --- Slope Calculation Function ---
-    def calculate_slope(series):
-        """Calculate slope of % changes, handling NaNs."""
-        series_clean = series.dropna()
-        if len(series_clean) < 2:
-            return np.nan
-        pct_changes = series_clean.pct_change().dropna()
-        if len(pct_changes) < 2:
-            return np.nan
-        x = np.arange(len(pct_changes))
-        y = pct_changes.values * 100  # Convert to percentage
-        return np.polyfit(x, y, 1)[0]  # Return only slope
-
     # --- Daily Slopes ---
     data['daily_ma9_slope'] = data['MA9'].rolling(window=3).apply(calculate_slope, raw=False)
     data['daily_ma20_slope'] = data['MA20'].rolling(window=5).apply(calculate_slope, raw=False)
 
     # --- 5-Minute Slopes ---
-    # Filter to ensure only pre-market data is included
-    data_5min = data_5min.between_time('04:00', '09:29')
-    
     # Calculate MA slopes for the last window of each day's pre-market session
     last_points = data_5min.groupby('date').tail(3)
     
@@ -103,6 +183,11 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
         
         # Merge HL data
         data = data.merge(hl_data, on='date', how='left')
+    
+    # Override open value for the last row if open_override is provided
+    if open_override is not None:
+        last_idx = data.index[-1]
+        data.at[last_idx, 'open'] = open_override if not data.at[last_idx, 'open'] else data.at[last_idx, 'open']
     
     # --- Premarket % Change ---
     data['premarket_pct_change'] = (data['open'] - data['close'].shift(1)) / data['close'].shift(1) * 100
@@ -145,5 +230,61 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     
     return data
 
+def get_up_down_percent_model_data_v02(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False, open_override=None):
+    """Get the up/down model data from the database."""
+    
+    data = get_daily_data_for_ticker(ticker, start_date)
+    data_5min = get_five_min_data_for_ticker(ticker, start_date)
+    
+    vix_data = get_daily_data_for_ticker("VIX", start_date)
+    us10y_data = get_daily_data_for_ticker("US10Y", start_date)
+    
+    # For both VIX and US10Y df, leave only date and open/close renamed to vix_open/vix_close and us10y_open/us10y_close
+    vix_data = vix_data[['open', 'close', 'date']].rename(columns={'open': 'vix_open', 'close': 'vix_close'})
+    us10y_data = us10y_data[['open', 'close', 'date']].rename(columns={'open': 'us10y_open', 'close': 'us10y_close'})
+    
+    # Merge VIX and US10Y data with daily data
+    data = data.merge(vix_data, on='date', how='left')
+    data = data.merge(us10y_data, on='date', how='left')
+    
+    # set index to date
+    data = data.set_index('date')
+    data_5min = data_5min.set_index('date')
+    
+    # SPY Calculate MA9/MA20 for daily and 5min data
+    data["MA9"] = data["close"].rolling(window=9, min_periods=1).mean()
+    data["MA20"] = data["close"].rolling(window=20, min_periods=1).mean()
+    data_5min["pm_MA9"] = data_5min.groupby('date')['close'].transform(
+        lambda x: x.rolling(window=9, min_periods=1).mean()
+    )
+    data_5min["pm_MA20"] = data_5min.groupby('date')['close'].transform(
+        lambda x: x.rolling(window=20, min_periods=1).mean()
+    )
+    data_5min["pm_MA9"] = data_5min["pm_MA9"]
+    data_5min["pm_MA20"] = data_5min["pm_MA20"]
+    
+    # Calculate slopes for daily and 5min data (only last calculation per day for premarket data)
+    data['daily_ma9_slope'] = data['MA9'].rolling(window=3).apply(calculate_slope, raw=False)
+    data['daily_ma20_slope'] = data['MA20'].rolling(window=5).apply(calculate_slope, raw=False)
+    data_5min['5min_premarket_9ma_slope'] = data_5min.groupby('date')['pm_MA9'].transform(
+        lambda x: x.rolling(window=3).apply(calculate_slope, raw=False)
+    )
+    data_5min['5min_premarket_20ma_slope'] = data_5min.groupby('date')['pm_MA20'].transform(
+        lambda x: x.rolling(window=3).apply(calculate_slope, raw=False)
+    )
+    data_5min = data_5min.groupby('date').last()  # Take last pre-market slope
+    
+    # Calculate bollinger band position for daily data
+    data['bb_position'] = calculate_bollinger_band_position(data['close'], n=20, clip_values=False)
+    data['realized_volatility'] = calculate_realized_volatility(data['close'], n=5)
+    
+    # Join data
+    data = data.merge(data_5min[['5min_premarket_9ma_slope', '5min_premarket_20ma_slope', 'pm_MA9', 'pm_MA20']], on='date', how='left')
+    data = data.drop(columns=["volume"])
+    
+    print(data)
+
 # data = get_up_down_percent_model_data(start_date="2025-04-01", ticker="SPY", up_threshold=1.005, down_threshold=0.995)
 # print(data.tail())
+
+get_up_down_percent_model_data_v02(start_date="2025-04-01", ticker="SPY", up_threshold=1.005, down_threshold=0.995)
