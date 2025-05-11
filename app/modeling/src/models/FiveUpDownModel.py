@@ -32,7 +32,7 @@ features = [
 target = 'move_status'
 
 # Time-based split
-split_date = pd.to_datetime("2022-01-01").date()
+split_date = pd.to_datetime("2022-06-01").date()
 train_data = final_data[final_data.index < split_date]
 test_data = final_data[final_data.index >= split_date]
 
@@ -140,6 +140,7 @@ if save:
             'model_type': 'TfUpDownModel',
             'ticker': 'SPY',
             'start_date': start_date,
+            'trained_through_date': str(split_date),
         },
     }
     

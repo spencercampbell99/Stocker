@@ -7,15 +7,13 @@ to predict market movements and simulates trading performance with Black-Scholes
 
 import sys
 from pathlib import Path
-import numpy as np
 import pandas as pd
 import tensorflow as tf
 import joblib
-import matplotlib.pyplot as plt
 import pandas as pd
 from sqlalchemy import text
 from db.database import get_session
-from models.DataHandler import get_up_down_percent_model_data
+from models.DataHandler import get_up_down_percent_model_data, get_percent_move_model_data
 from scripts.model_evals.TradingSimulation import (
     simulate_options_trading,
     plot_options_trading_results,
@@ -27,9 +25,59 @@ from scripts.model_evals.TradingSimulation import (
 sys.path.append(str(Path(__file__).parents[3]))
 
 # Constants
-START_DATE = "2024-01-01"
+START_DATE = "2025-01-01"
 TICKER = "SPY"
-MODEL_VERSION = "v0.1"
+MODEL_VERSION = "TfStraightUpDownModel_v0.1"
+
+def get_market_data_straight_model(start_date=START_DATE, ticker=TICKER):
+    """
+    Fetch and merge all required market data for the straight model
+    
+    Args:
+        start_date: Start date for the data
+        ticker: Ticker symbol
+        
+    Returns:
+        DataFrame with market data
+    """
+    print(f"Fetching market data from database for {ticker} starting {start_date}...")
+    
+    # Get core price data
+    data = get_percent_move_model_data(
+        start_date=start_date,
+        ticker=ticker,
+    )
+
+    # Get open price for 4:15 every day
+    db = get_session()
+    query = text(f"""
+        SELECT
+            "timestamp"::date as date,
+            close
+        FROM
+            stocks_fivemincandle
+        WHERE
+            ticker = '{ticker}'
+            AND "timestamp" >= '{start_date}'
+            AND "timestamp"::time = '16:10:00'
+    """)
+    
+    four_fifteen_close_data = db.execute(query).fetchall()
+    db.close()
+    
+    # convert to DataFrame and concat
+    four_fifteen_close_data = pd.DataFrame(four_fifteen_close_data, columns=['date', 'four_fifteen_price'])
+    four_fifteen_close_data['date'] = pd.to_datetime(four_fifteen_close_data['date'])
+    four_fifteen_close_data.set_index('date', inplace=True)
+    
+    data = pd.concat([data, four_fifteen_close_data], axis=1)
+    
+    # make sure all data columns are float
+    for col in data.columns:
+        if col not in ['date', 'ticker']:
+            data[col] = pd.to_numeric(data[col], errors='coerce')
+            
+    return data
 
 def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, down_threshold=0.995):
     """
@@ -94,8 +142,6 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     # Convert to DataFrame
     macro_data = pd.DataFrame(macro_data, columns=['date', 'vix_close', 'us10y_close', 'vix_open', 'us10y_open'])
     
-    print(macro_data.tail())
-    
     # Shift close so date of 2025-04-20 has close of 2025-04-19
     # macro_data['vix_close'] = macro_data['vix_close'].shift(1)
     # macro_data['us10y_close'] = macro_data['us10y_close'].shift(1)
@@ -120,7 +166,7 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
         WHERE
             ticker = '{ticker}'
             AND "timestamp" >= '{start_date}'
-            AND "timestamp"::time = '14:10:00'
+            AND "timestamp"::time = '16:10:00'
     """)
     
     four_fifteen_close_data = db.execute(query).fetchall()
@@ -138,8 +184,6 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
         if col not in ['date', 'ticker']:
             data[col] = pd.to_numeric(data[col], errors='coerce')
     
-    print(data.tail())
-    
     return data
 
 def load_model_and_metadata(model_version=MODEL_VERSION):
@@ -147,32 +191,53 @@ def load_model_and_metadata(model_version=MODEL_VERSION):
     Load the saved TensorFlow model and its metadata
     
     Args:
-        model_version: Version tag of the model to load
+        model_version: Version of model to load from saved_models directory
         
     Returns:
         tuple: (model, metadata_dict)
     """
-    print(f"Loading TfUpDownModel_{model_version} and metadata...")
+    print(f"Loading {model_version} and metadata...")
     
     # Define paths to model and metadata files
     model_dir = Path(__file__).parents[3] / "saved_models"
-    model_path = model_dir / f"TfUpDownModel_{model_version}.h5"
-    metadata_path = model_dir / f"TfUpDownModel_{model_version}_metadata.pkl"
+    model_path = model_dir / f"{model_version}.h5"
+    fallback_model_path = model_dir / f"{model_version}.tflite"
+    metadata_path = model_dir / f"{model_version}_metadata.pkl"
     
     # Check if files exist
-    if not model_path.exists():
+    if model_path.exists():
+        model = tf.keras.models.load_model(str(model_path))   
+    elif fallback_model_path.exists():
+        model = tf.lite.Interpreter(model_path=str(fallback_model_path))
+    else:
         raise FileNotFoundError(f"Model file not found: {model_path}")
         
     if not metadata_path.exists():
         raise FileNotFoundError(f"Metadata file not found: {metadata_path}")
     
-    # Load the TensorFlow model
-    model = tf.keras.models.load_model(str(model_path))
-    
     # Load the metadata
     metadata = joblib.load(str(metadata_path))
     
     return model, metadata
+
+MODEL_FUNCTION_MAPPINGS = {
+    "TfStraightUpDownModel": {
+        "v0.1": {
+            "model": load_model_and_metadata,
+            "get_market_data": get_market_data_straight_model,
+        },
+    },
+    "TfUpDownModel": {
+        "v0.1": {
+            "model": load_model_and_metadata,
+            "get_market_data": get_market_data,
+        },
+        "v0.2": {
+            "model": load_model_and_metadata,
+            "get_market_data": get_market_data,
+        }
+    },
+}
 
 def main():
     """Main function"""
@@ -190,15 +255,22 @@ def main():
         print(f"\nModel information:")
         print(f"- Version: {model_version}")
         print(f"- Ticker: {ticker}")
-        print(f"- Threshold settings: Up > {up_threshold:.4f}, Down < {down_threshold:.4f}")
+        # print(f"- Threshold settings: Up > {up_threshold:.4f}, Down < {down_threshold:.4f}")
         print(f"- Features: {', '.join(features)}")
         
+        market_data_func = MODEL_FUNCTION_MAPPINGS.get(
+            metadata['metadata']['model_type'], {}).get(model_version, {}).get("get_market_data")
+        if not market_data_func:
+            raise ValueError(f"Model version {model_version} not supported for {metadata['metadata']['model_type']}")
+        
+        # if metadata['metadata']['trained_through_date'] > START_DATE, update start date
+        start_date = START_DATE
+        if metadata['metadata']['trained_through_date'] > START_DATE:
+            start_date = metadata['metadata']['trained_through_date']
+        
         # Get market data from the database
-        daily_data = get_market_data(
-            start_date=START_DATE,
-            ticker=ticker,
-            up_threshold=up_threshold,
-            down_threshold=down_threshold
+        daily_data = market_data_func(
+            start_date=start_date
         )
         print(f"Loaded {len(daily_data)} days of market data")
         

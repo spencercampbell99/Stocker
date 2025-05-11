@@ -268,7 +268,7 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     
     return data
 
-def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False, open_override=None):
+def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", open_override=None):
     """Get the up/down model data from the database."""
     
     data = get_daily_data_for_ticker(ticker, start_date)
@@ -329,6 +329,19 @@ def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", up_thresh
         data.at[last_idx, 'open'] = open_override if not data.at[last_idx, 'open'] else data.at[last_idx, 'open']
     
     data['premarket_pct_change'] = (data['open'] - data['close'].shift(1)) / data['close'].shift(1) * 100
+    
+    # Clean
+    data = data.dropna(subset=[
+        'daily_ma9_slope', 
+        'daily_ma20_slope', 
+        '5min_premarket_9ma_slope',
+        '5min_premarket_20ma_slope',
+        'bb_position',
+        'realized_volatility',
+        'vix_open', 'vix_close',
+        'us10y_open', 'us10y_close',
+        'pm_MA9', 'pm_MA20'
+    ])
     
     return data
 

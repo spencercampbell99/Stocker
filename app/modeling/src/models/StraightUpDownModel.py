@@ -1,5 +1,6 @@
 from models.DataHandler import get_percent_move_model_data
 from sklearn.preprocessing import RobustScaler
+from sklearn.model_selection import train_test_split
 import pandas as pd
 import tensorflow as tf
 import joblib
@@ -19,9 +20,6 @@ os.makedirs(save_dir, exist_ok=True)
 data = get_percent_move_model_data(
     start_date=start_date,
     ticker="SPY",
-    up_threshold=up_threshold,
-    down_threshold=down_threshold,
-    skip_move_status=True
 )
 
 # --- Feature Selection ---
@@ -54,16 +52,14 @@ target = 'call_put'
 data = data.dropna(subset=features + [target])
 
 # --- Train/Test Split ---
-split_date = pd.to_datetime("2022-01-01").date()
+split_date = pd.to_datetime("2022-06-01").date()
 train_data = data[data.index < split_date]
 test_data = data[data.index >= split_date]
 
-# --- Validation Split ---
-val_split_idx = int(len(train_data) * 0.9)
-X_train = train_data[features].iloc[:val_split_idx]
-X_val = train_data[features].iloc[val_split_idx:]
-y_train = train_data[target].iloc[:val_split_idx]
-y_val = train_data[target].iloc[val_split_idx:]
+# --- Validation Split (random, reproducible) ---
+X_train, X_val, y_train, y_val = train_test_split(
+    train_data[features], train_data[target], test_size=0.1, random_state=42, shuffle=True
+)
 
 # --- Scaling ---
 scaler = RobustScaler()
@@ -106,8 +102,30 @@ history = model.fit(
 test_probs = model.predict(X_test_scaled).flatten()
 test_preds = (test_probs > 0.5).astype(int)
 from sklearn.metrics import classification_report
+from sklearn.metrics import confusion_matrix
 print("\nTest Classification Report:")
 print(classification_report(test_data[target], test_preds, target_names=["Put/Down", "Call/Up"]))
+
+# --- Detailed Test Results ---
+test_results = pd.DataFrame({
+    'date': test_data.index,
+    'actual': test_data[target].values,
+    'predicted': test_preds,
+    'probability': test_probs
+})
+
+# Calculate accuracy and display summary
+accuracy = (test_results['actual'] == test_results['predicted']).mean()
+print(f"\nTest Accuracy: {accuracy:.4f}")
+
+# Display predictions vs actual for test data
+print("\nSample of Predicted vs Actual:")
+print(test_results[['date', 'actual', 'predicted', 'probability']])
+
+# Show confusion matrix
+cm = confusion_matrix(test_results['actual'], test_results['predicted'])
+print("\nConfusion Matrix:")
+print(cm)
 
 # --- Save Model (TF Lite) ---
 model_version = version_base
@@ -119,8 +137,8 @@ with open(tflite_path, "wb") as f:
     f.write(tflite_model)
 
 # Optionally, save Keras model for retraining (not needed for TFLite inference)
-# keras_model_path = os.path.join(save_dir, f"{model_type}_{model_version}.h5")
-# model.save(keras_model_path, include_optimizer=False)
+keras_model_path = os.path.join(save_dir, f"{model_type}_{model_version}.h5")
+model.save(keras_model_path, include_optimizer=False)
 
 # Save metadata (scaler, features, etc.)
 metadata = {
@@ -136,6 +154,7 @@ metadata = {
         'model_type': model_type,
         'ticker': 'SPY',
         'start_date': start_date,
+        'trained_through_date': str(split_date),
     },
 }
 joblib.dump(metadata, os.path.join(save_dir, f"{model_type}_{model_version}_metadata.pkl"))

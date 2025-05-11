@@ -17,6 +17,126 @@ EASTERN_TZ = pytz.timezone('US/Eastern')
 TRADE_START_TIME = datetime.strptime("09:30", "%H:%M").time()
 TRADE_END_TIME = datetime.strptime("16:00", "%H:%M").time()
 
+PREDICTION_MAPPING = {
+    0: "DOWN",
+    1: "NEUTRAL",
+    2: "UP"
+}
+
+def build_predictions_df_five_up_down_v01(daily_data, model, metadata):
+    """
+    Build predictions DataFrame for the FiveUpDown model
+    
+    Args:
+        daily_data: DataFrame with daily market data
+        model: TensorFlow model
+        metadata: Model metadata dictionary
+        
+    Returns:
+        DataFrame with predictions and market data
+    """
+    # Extract model parameters
+    features = metadata['features']
+    scaler = metadata['scaler']
+    
+    # Prepare data and get predictions
+    X = daily_data[features]
+    X_scaled = scaler.transform(X)
+    y_pred_proba = model.predict(X_scaled, verbose=0)
+    
+    y_pred = np.argmax(y_pred_proba, axis=1)
+    y_pred_no_neutral = np.argmax(y_pred_proba[:, [0, 2]], axis=1)
+    
+    # Map predictions to labels
+    y_pred_labels = np.vectorize(PREDICTION_MAPPING.get)(y_pred)
+    y_pred_no_neutral_labels = np.vectorize(PREDICTION_MAPPING.get)(y_pred_no_neutral)
+    
+    # Create predictions DataFrame
+    predictions_df = pd.DataFrame({
+        'date': daily_data.index,
+        'actual': daily_data['move_status'],
+        'prediction': y_pred_labels,
+        "prediction_no_neutral": y_pred_no_neutral_labels,
+        'open': daily_data['open'],
+        'close': daily_data['close'],  # Make sure we have close price from daily data
+        'vix_close': daily_data['vix_close'],
+        'us10y_close': daily_data['us10y_close'],
+        'vix_open': daily_data['vix_open'],
+        'us10y_open': daily_data['us10y_open'],
+        'four_fifteen_price': daily_data['four_fifteen_price'],
+        'day_low': daily_data['low'],
+        'day_high': daily_data['high'],
+    })
+    
+    return predictions_df
+
+def build_predictions_df_straight_up_down_v01(daily_data, model, metadata):
+    """
+    Build predictions DataFrame for the StraightUpDown model
+    
+    Args:
+        daily_data: DataFrame with daily market data
+        model: TensorFlow model
+        metadata: Model metadata dictionary
+        
+    Returns:
+        DataFrame with predictions and market data
+    """
+    # Extract model parameters
+    features = metadata['features']
+    scaler = metadata['scaler']
+    
+    # Actual
+    daily_data['actual'] = np.where(daily_data['close'] > daily_data['open'], "UP", "DOWN")
+    
+    # Prepare data and get predictions
+    X = daily_data[features]
+    X_scaled = scaler.transform(X)
+    y_pred_proba = model.predict(X_scaled, verbose=0).flatten()
+    y_pred = (y_pred_proba > 0.5).astype(int)
+    
+    # Change from 0,1 to 0,2
+    y_pred = np.where(y_pred == 1, 2, 0)
+    
+    y_pred_labels = np.vectorize(PREDICTION_MAPPING.get)(y_pred)
+    
+    # Create predictions DataFrame
+    predictions_df = pd.DataFrame({
+        'date': daily_data.index,
+        'actual': daily_data['actual'],
+        'prediction': y_pred_labels,
+        'prediction_no_neutral': y_pred_labels,  # No neutral prediction for this model
+        'open': daily_data['open'],
+        'close': daily_data['close'],  # Make sure we have close price from daily data
+        'vix_close': daily_data['vix_close'],
+        'us10y_close': daily_data['us10y_close'],
+        'vix_open': daily_data['vix_open'],
+        'us10y_open': daily_data['us10y_open'],
+        'four_fifteen_price': daily_data['four_fifteen_price'],
+        'day_low': daily_data['low'],
+        'day_high': daily_data['high'],
+    })
+    
+    return predictions_df
+
+MODEL_TYPE_MAPPING = {
+    # Actually FiveUpDownModel, just did bad naming
+    "TfUpDownModel": {
+        "v0.1": {
+            "build_func": build_predictions_df_five_up_down_v01,
+        },
+        "v0.2": {
+            "build_func": build_predictions_df_five_up_down_v01,
+        },
+    },
+    "TfStraightUpDownModel":
+        {
+            "v0.1": {
+                "build_func": build_predictions_df_straight_up_down_v01,
+            }
+        }
+}
+
 def simulate_options_trading(model, metadata, daily_data):
     """
     Core trading simulation with Black-Scholes pricing
@@ -29,33 +149,13 @@ def simulate_options_trading(model, metadata, daily_data):
     Returns:
         Dictionary with trading results
     """
-    # Extract model parameters
-    features = metadata['features']
-    scaler = metadata['scaler']
+    # Build predictions DataFrame
+    model_mapping = MODEL_TYPE_MAPPING.get(metadata['metadata']['model_type'], {}).get(metadata['metadata']['model_version'], {})
+    if not model_mapping:
+        raise ValueError(f"Model type {metadata['metadata']['model_type']} and version {metadata['metadata']['model_version']} not supported.")
     
-    # Prepare data and get predictions
-    X = daily_data[features]
-    X_scaled = scaler.transform(X)
-    y_pred_proba = model.predict(X_scaled, verbose=0)
-    y_pred = np.argmax(y_pred_proba, axis=1)
-    y_pred_no_neutral = np.argmax(y_pred_proba[:, [0, 2]], axis=1)
-    
-    # Create predictions DataFrame
-    predictions_df = pd.DataFrame({
-        'date': daily_data.index,
-        'actual': daily_data['move_status'],
-        'prediction': y_pred,
-        'prediction_no_neutral': y_pred_no_neutral,
-        'open': daily_data['open'],
-        'close': daily_data['close'],  # Make sure we have close price from daily data
-        'vix_close': daily_data['vix_close'],
-        'us10y_close': daily_data['us10y_close'],
-        'vix_open': daily_data['vix_open'],
-        'us10y_open': daily_data['us10y_open'],
-        'four_fifteen_price': daily_data['four_fifteen_price'],
-        'day_low': daily_data['low'],
-        'day_high': daily_data['high'],
-    })
+    build_func = model_mapping['build_func']
+    predictions_df = build_func(daily_data, model, metadata)
     
     # Initialize trading variables
     trades = []
@@ -76,7 +176,7 @@ def simulate_options_trading(model, metadata, daily_data):
         actual = row['actual']
 
         # Skip neutral predictions
-        if prediction == 1:
+        if prediction == 'NEUTRAL':
             neutral_count += 1
             prediction = row['prediction_no_neutral']
             # continue
@@ -101,7 +201,7 @@ def simulate_options_trading(model, metadata, daily_data):
         exit_time = EASTERN_TZ.localize(exit_time) if exit_time.tzinfo is None else exit_time
         
         # Determine option type
-        option_type = "call" if prediction == 2 else "put"
+        option_type = "call" if prediction == 'UP' else "put"
         
         # Get option chain
         option_chain = get_option_prices(
@@ -202,6 +302,10 @@ def simulate_options_trading(model, metadata, daily_data):
         
         # Calculate position and update balance
         position_size = get_position_size(balance, premium)
+        
+        if balance < 5000 and performance_pct < 0:
+            # Simulate 25% stop loss intead of full loss
+            performance_pct = -0.25
         
         dollar_return = position_size * performance_pct
         new_balance = balance + dollar_return
@@ -370,8 +474,8 @@ def save_options_trading_results_to_table(trading_results, table_name="options_t
         date DATE,
         entry_time TIMESTAMP,
         exit_time TIME,
-        prediction INT,
-        actual INT,
+        prediction VARCHAR(10),
+        actual VARCHAR(10),
         option_type VARCHAR(5),
         strike FLOAT,
         vix_close FLOAT,
