@@ -43,6 +43,23 @@ def calculate_slope(series):
     y = pct_changes.values * 100  # Convert to percentage
     return np.polyfit(x, y, 1)[0]  # Return only slope
 
+def calculate_slope_vectorized(series):
+    """Vectorized calculation of slope of % changes, handling NaNs."""
+    # Drop NaNs for rolling window, but keep index alignment
+    pct_changes = series.pct_change() * 100
+    n = len(pct_changes)
+    if n < 2:
+        return np.nan
+    x = np.arange(n)
+    mask = ~np.isnan(pct_changes)
+    if mask.sum() < 2:
+        return np.nan
+    # Only use valid (non-NaN) values
+    x_valid = x[mask]
+    y_valid = pct_changes[mask]
+    slope = np.polyfit(x_valid, y_valid, 1)[0]
+    return slope
+
 def calculate_realized_volatility(series, n):
     """Calculate realized volatility of a series
     
@@ -91,6 +108,27 @@ def calculate_bollinger_band_position(series, n, clip_values=True):
         position = position.clip(-1, 1)
     
     return position
+
+def calculate_bollinger_band_position_vectorized(series, n, clip_values=True):
+    """Vectorized calculation of the position of price within Bollinger Bands."""
+    middle_band = series.rolling(window=n).mean()
+    std_dev = series.rolling(window=n).std()
+    upper_band = middle_band + (2 * std_dev)
+    lower_band = middle_band - (2 * std_dev)
+    band_width = upper_band - lower_band
+    band_width = band_width.replace(0, np.nan)
+    position = (series - middle_band) / (0.5 * band_width)
+    if clip_values:
+        position = position.clip(-1, 1)
+    return position
+
+def calculate_realized_volatility_vectorized(series, n):
+    """Vectorized calculation of realized volatility."""
+    log_returns = np.log(series / series.shift(1))
+    squared_returns = log_returns ** 2
+    rolling_sum = squared_returns.rolling(window=n).sum()
+    realized_volatility = np.sqrt((252 / n) * rolling_sum) * 100
+    return realized_volatility
 
 def calculate_average_true_range(data, n):
     """Calculate the Average True Range (ATR) for a given data series.
@@ -230,7 +268,7 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     
     return data
 
-def get_up_down_percent_model_data_v02(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False, open_override=None):
+def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False, open_override=None):
     """Get the up/down model data from the database."""
     
     data = get_daily_data_for_ticker(ticker, start_date)
@@ -264,27 +302,37 @@ def get_up_down_percent_model_data_v02(start_date="2018-01-01", ticker="SPY", up
     data_5min["pm_MA20"] = data_5min["pm_MA20"]
     
     # Calculate slopes for daily and 5min data (only last calculation per day for premarket data)
-    data['daily_ma9_slope'] = data['MA9'].rolling(window=3).apply(calculate_slope, raw=False)
-    data['daily_ma20_slope'] = data['MA20'].rolling(window=5).apply(calculate_slope, raw=False)
-    data_5min['5min_premarket_9ma_slope'] = data_5min.groupby('date')['pm_MA9'].transform(
-        lambda x: x.rolling(window=3).apply(calculate_slope, raw=False)
-    )
-    data_5min['5min_premarket_20ma_slope'] = data_5min.groupby('date')['pm_MA20'].transform(
-        lambda x: x.rolling(window=3).apply(calculate_slope, raw=False)
-    )
+    data['daily_ma9_slope'] = data['MA9'].rolling(window=3).apply(calculate_slope_vectorized, raw=False)
+    data['daily_ma20_slope'] = data['MA20'].rolling(window=5).apply(calculate_slope_vectorized, raw=False)
+    
+    # Only calculate slope on the last n (e.g., 3) candles of each premarket session
+    n = 3
+    def last_n_slope(x):
+        if len(x) < n:
+            return np.nan
+        return calculate_slope_vectorized(x.iloc[-n:])
+    data_5min['5min_premarket_9ma_slope'] = data_5min.groupby('date')['pm_MA9'].transform(last_n_slope)
+    data_5min['5min_premarket_20ma_slope'] = data_5min.groupby('date')['pm_MA20'].transform(last_n_slope)
     data_5min = data_5min.groupby('date').last()  # Take last pre-market slope
     
-    # Calculate bollinger band position for daily data
-    data['bb_position'] = calculate_bollinger_band_position(data['close'], n=20, clip_values=False)
-    data['realized_volatility'] = calculate_realized_volatility(data['close'], n=5)
-    
+    # Calculate bollinger band position for daily data (optimized, reusable)
+    data['bb_position'] = calculate_bollinger_band_position_vectorized(data['close'], n=20, clip_values=False)
+    data['realized_volatility'] = calculate_realized_volatility_vectorized(data['close'], n=5)
+
     # Join data
     data = data.merge(data_5min[['5min_premarket_9ma_slope', '5min_premarket_20ma_slope', 'pm_MA9', 'pm_MA20']], on='date', how='left')
     data = data.drop(columns=["volume"])
     
-    print(data)
+    # Calculate % change from previous close to open (pm % change)
+    if open_override is not None:
+        last_idx = data.index[-1]
+        data.at[last_idx, 'open'] = open_override if not data.at[last_idx, 'open'] else data.at[last_idx, 'open']
+    
+    data['premarket_pct_change'] = (data['open'] - data['close'].shift(1)) / data['close'].shift(1) * 100
+    
+    return data
 
 # data = get_up_down_percent_model_data(start_date="2025-04-01", ticker="SPY", up_threshold=1.005, down_threshold=0.995)
 # print(data.tail())
 
-get_up_down_percent_model_data_v02(start_date="2025-04-01", ticker="SPY", up_threshold=1.005, down_threshold=0.995)
+# get_percent_move_model_data(start_date="2017-04-01", ticker="SPY", up_threshold=1.005, down_threshold=0.995)
