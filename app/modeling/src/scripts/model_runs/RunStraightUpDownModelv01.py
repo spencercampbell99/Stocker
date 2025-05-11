@@ -2,7 +2,7 @@
 """
 RunModelv0-1ForDay.py
 
-Script to run the TfUpDownModel_v0.1 on the current day's data.
+Script to run the TfStraightUpDownModel_v0.1 on the current day's data.
 This script:
 1. Loads the saved v0.1 TensorFlow model
 2. Gets the latest market data (SPY, VIX, US10Y)
@@ -25,7 +25,7 @@ sys.path.append(str(Path(__file__).parents[3]))
 
 # Import required modules
 from data.CandleData import CandleDataManager
-from models.DataHandler import get_up_down_percent_model_data
+from models.DataHandler import get_percent_move_model_data
 from scripts.model_evals.OptionPricingCalculator import get_option_prices, select_best_option
 
 
@@ -39,12 +39,12 @@ def load_model_and_metadata(model_version="v0.1"):
     Returns:
         tuple: (model, metadata_dict)
     """
-    print(f"Loading TfUpDownModel_{model_version} and metadata...")
+    print(f"Loading TfStraightUpDownModel_{model_version} and metadata...")
     
     # Define paths to model and metadata files
     model_dir = Path(__file__).parents[3] / "saved_models"
-    model_path = model_dir / f"TfUpDownModel_{model_version}.h5"
-    metadata_path = model_dir / f"TfUpDownModel_{model_version}_metadata.pkl"
+    model_path = model_dir / f"TfStraightUpDownModel_{model_version}.h5"
+    metadata_path = model_dir / f"TfStraightUpDownModel_{model_version}_metadata.pkl"
     
     # Check if files exist
     if not model_path.exists():
@@ -133,11 +133,7 @@ def prepare_model_features(model_metadata, override_date=None, open_override=Non
         DataFrame: DataFrame containing features for model prediction
     """
     print("Preparing features for model prediction...")
-    
-    # Get up/down threshold parameters from metadata
-    up_threshold = model_metadata.get('thresholds', {}).get('up_threshold', 1.005)
-    down_threshold = model_metadata.get('thresholds', {}).get('down_threshold', 0.995)
-    
+
     target_date = datetime.strptime(override_date, '%Y-%m-%d') if override_date else datetime.now()
     target_date_str = target_date.strftime('%Y-%m-%d')
     
@@ -145,12 +141,9 @@ def prepare_model_features(model_metadata, override_date=None, open_override=Non
     start_date = (target_date - timedelta(days=60)).strftime('%Y-%m-%d')
     
     # Use the data handler to get properly formatted data
-    data = get_up_down_percent_model_data(
+    data = get_percent_move_model_data(
         start_date=start_date,
         ticker="SPY",
-        up_threshold=up_threshold,
-        down_threshold=down_threshold,
-        skip_move_status=True,
         open_override=open_override,
     )
     
@@ -194,7 +187,7 @@ def make_prediction(model, data, metadata):
     
     # Make prediction
     pred_proba = model.predict(X_scaled, verbose=0)
-    pred_class = np.argmax(pred_proba, axis=1)[0]
+    pred_class = 2 if pred_proba[0][0] > 0.5 else 0
     
     # Class mapping: 0 = Down, 1 = Flat, 2 = Up
     class_names = {
@@ -204,9 +197,9 @@ def make_prediction(model, data, metadata):
     }
     
     print(f"Prediction: {class_names[pred_class]} (Class {pred_class})")
-    print(f"Probabilities: Down: {pred_proba[0][0]:.4f}, Flat: {pred_proba[0][1]:.4f}, Up: {pred_proba[0][2]:.4f}")
+    print(f"Probabilities: UP: {pred_proba[0][0]:.4f}")
     
-    return pred_class, pred_proba[0], features
+    return pred_class, pred_proba[0][0], features
 
 
 def select_option_trade(prediction, spy_price, vix_value, us10y_value, max_affordability=None):
@@ -384,7 +377,7 @@ def main():
     """Main function to run the model for the current day"""
     try:
         print("\n" + "=" * 60)
-        print("Running TfUpDownModel_v0.1 for Today")
+        print("Running TfStraightUpDownModel_v0.1 for Today")
         print("=" * 60)
         
         today = datetime.now().strftime('%Y-%m-%d')
@@ -435,7 +428,7 @@ def main():
         prediction_map = {0: "DOWN", 1: "FLAT/NEUTRAL", 2: "UP"}
         print(f"Date: {date_to_get}")
         print(f"Prediction: {prediction_map[prediction]}")
-        print(f"Confidence: Down: {probabilities[0]:.4f}, Flat: {probabilities[1]:.4f}, Up: {probabilities[2]:.4f}")
+        print(f"Confidence: UP: {probabilities:.4f}")
         
         print("\n" + "=" * 60)
         print("RECOMMENDED OPTION TRADE")

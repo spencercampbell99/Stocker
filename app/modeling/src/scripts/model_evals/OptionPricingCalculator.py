@@ -113,6 +113,13 @@ def select_best_option(options, spot_price, direction="call", max_affordability=
     best_premium = None
     best_diff = float('inf')
     
+    # If call, sort by strike descending
+    # If put, sort by strike ascending
+    if direction == "call":
+        options = dict(sorted(options.items(), key=lambda x: x[0], reverse=True))
+    else:
+        options = dict(sorted(options.items(), key=lambda x: x[0]))
+    
     for strike, premium in options.items():
         # Apply filters
         if premium < MIN_PREMIUM:
@@ -120,9 +127,12 @@ def select_best_option(options, spot_price, direction="call", max_affordability=
         
         if max_affordability is not None and premium > max_affordability:
             continue
-            
-        strike_pct_diff = abs(strike - spot_price) / spot_price
-        if strike_pct_diff > 0.05:  # Max 5% from spot
+        
+        if direction == "call":
+            strike_pct_diff = abs(strike + premium - spot_price) / premium
+        else:
+            strike_pct_diff = abs(strike - premium - spot_price) / premium
+        if strike_pct_diff > 0.15:
             continue
             
         if direction == "call":
@@ -134,10 +144,10 @@ def select_best_option(options, spot_price, direction="call", max_affordability=
                 continue
             diff = abs((strike - premium) - spot_price)
         
-        if diff < best_diff:
-            best_diff = diff
-            best_strike = strike
-            best_premium = premium
+        best_diff = diff
+        best_strike = strike
+        best_premium = premium
+        break
     
     if best_strike is None:
         return None, None, "No valid ITM option found meeting criteria"
@@ -166,9 +176,9 @@ def simulate_option_performance(exit_ticker_price, entry_premium, strike, us10y,
 
     if expir_time_override == 0:
         if direction == "call":
-            close_price = exit_ticker_price - strike
+            close_price = max(exit_ticker_price - strike, 0)
         else:
-            close_price = strike - exit_ticker_price
+            close_price = max(strike - exit_ticker_price, 0)
     else:
         # Calculate option price
         close_price = calculate_black_scholes(

@@ -16,7 +16,6 @@ import json
 # Import required modules
 from data.CandleData import CandleDataManager
 from models.DataHandler import get_up_down_percent_model_data
-from scripts.model_runs.RunModelv01 import load_model_and_metadata, prepare_model_features, make_prediction, select_option_trade
 
 # Load dotenv
 dotenv.load_dotenv()
@@ -243,6 +242,71 @@ def predict_market(
     Get market prediction and suggested option trade based on 
     current SPY price, VIX, and US10Y values.
     """
+    from scripts.model_runs.RunModelv01 import load_model_and_metadata, prepare_model_features, make_prediction, select_option_trade
+    try:
+        # Load model and metadata
+        model, metadata = load_model_and_metadata()
+        
+        date = request.date if request.date else None
+        
+        # Prepare features for the model
+        model_features = prepare_model_features(metadata, override_date=date, open_override=request.spy_price)
+        
+        if not date:
+            # If no date is provided, use the current date
+            date = datetime.now().strftime('%Y-%m-%d')
+        
+        # Make prediction
+        pred_class, probabilities, features_used = make_prediction(model, model_features, metadata)
+        
+        # Map prediction class to label
+        prediction_map = {0: "DOWN", 1: "FLAT/NEUTRAL", 2: "UP"}
+        prediction = prediction_map[pred_class]
+        
+        # Get option trade suggestion
+        option_trade = select_option_trade(
+            prediction=pred_class,
+            spy_price=request.spy_price,
+            vix_value=request.vix_value,
+            us10y_value=request.us10y_value,
+            max_affordability=request.max_affordability if request.max_affordability else None,
+        )
+        
+        return {
+            "success": True,
+            "date": date,
+            "prediction": prediction,
+            "prediction_class": int(pred_class),
+            "probabilities": {
+                "down": float(probabilities[0]),
+                "flat": float(probabilities[1]),
+                "up": float(probabilities[2])
+            },
+            "option_trade": option_trade,
+            "message": "Prediction successful"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "date": "",
+            "prediction": "ERROR",
+            "prediction_class": -1,
+            "probabilities": {"down": 0.0, "flat": 0.0, "up": 0.0},
+            "option_trade": None,
+            "message": f"Error making prediction: {str(e)}"
+        }
+
+@app.post("/api/predict/straight", response_model=PredictionResponse)
+def predict_market(
+        request: PredictionRequest,
+        api_key: APIKey = Depends(get_api_key),
+    ):
+    """
+    Get market prediction and suggested option trade based on 
+    current SPY price, VIX, and US10Y values.
+    """
+    from scripts.model_runs.RunStraightUpDownModelv01 import load_model_and_metadata, prepare_model_features, make_prediction, select_option_trade
     try:
         # Load model and metadata
         model, metadata = load_model_and_metadata()

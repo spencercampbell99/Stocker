@@ -87,7 +87,7 @@ def build_predictions_df_straight_up_down_v01(daily_data, model, metadata):
     scaler = metadata['scaler']
     
     # Actual
-    daily_data['actual'] = np.where(daily_data['close'] > daily_data['open'], "UP", "DOWN")
+    daily_data['actual'] = np.where(daily_data['four_fifteen_price'] > daily_data['open'], "UP", "DOWN")
     
     # Prepare data and get predictions
     X = daily_data[features]
@@ -211,13 +211,27 @@ def simulate_options_trading(model, metadata, daily_data):
             direction=option_type
         )
 
-        # Select best option
-        strike, premium, reason = select_best_option(
-            option_chain,
-            market_open,
-            option_type,
-            max_affordability=balance / 100 # Balance divided by 100 to account for 100x for premium costs
-        )
+        usesetdiff = False
+        if usesetdiff:
+            strike = round(market_open - 5) if option_type == "call" else round(market_open + 5)
+            premium = option_chain.get(strike, None)
+            if premium is None:
+                # Select best option
+                strike, premium, reason = select_best_option(
+                    option_chain,
+                    market_open,
+                    option_type,
+                    max_affordability=balance / 100 # Balance divided by 100 to account for 100x for premium costs
+                )
+            else:
+                reason = "$5 strike price diff"
+        else:
+            strike, premium, reason = select_best_option(
+                option_chain,
+                market_open,
+                option_type,
+                max_affordability=balance / 100 # Balance divided by 100 to account for 100x for premium costs
+            )
         
         if strike is None:
             continue  # Skip if no valid option found

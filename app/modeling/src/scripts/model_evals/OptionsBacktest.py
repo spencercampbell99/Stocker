@@ -25,9 +25,10 @@ from scripts.model_evals.TradingSimulation import (
 sys.path.append(str(Path(__file__).parents[3]))
 
 # Constants
-START_DATE = "2025-01-01"
+START_DATE = "2025-04-23"
 TICKER = "SPY"
 MODEL_VERSION = "TfStraightUpDownModel_v0.1"
+# MODEL_VERSION = "TfUpDownModel_v0.1"
 
 def get_market_data_straight_model(start_date=START_DATE, ticker=TICKER):
     """
@@ -41,6 +42,12 @@ def get_market_data_straight_model(start_date=START_DATE, ticker=TICKER):
         DataFrame with market data
     """
     print(f"Fetching market data from database for {ticker} starting {start_date}...")
+    
+    original_start_date = start_date
+    
+    # move start_date back 2 months
+    start_date = pd.to_datetime(start_date) - pd.DateOffset(months=2)
+    start_date = start_date.strftime('%Y-%m-%d')
     
     # Get core price data
     data = get_percent_move_model_data(
@@ -76,7 +83,12 @@ def get_market_data_straight_model(start_date=START_DATE, ticker=TICKER):
     for col in data.columns:
         if col not in ['date', 'ticker']:
             data[col] = pd.to_numeric(data[col], errors='coerce')
-            
+    
+    data = data.dropna()
+    
+    # filter to after original_start_date
+    data = data[data.index >= pd.to_datetime(original_start_date).date()]
+    
     return data
 
 def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, down_threshold=0.995):
@@ -184,6 +196,8 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
         if col not in ['date', 'ticker']:
             data[col] = pd.to_numeric(data[col], errors='coerce')
     
+    data = data.dropna()
+    
     return data
 
 def load_model_and_metadata(model_version=MODEL_VERSION):
@@ -265,7 +279,7 @@ def main():
         
         # if metadata['metadata']['trained_through_date'] > START_DATE, update start date
         start_date = START_DATE
-        if metadata['metadata']['trained_through_date'] > START_DATE:
+        if 'trained_through_date' in metadata.get('metadata', {}) and metadata['metadata']['trained_through_date'] > START_DATE:
             start_date = metadata['metadata']['trained_through_date']
         
         # Get market data from the database
