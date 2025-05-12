@@ -138,6 +138,87 @@ class CandleDataManager:
         
         return {'success': True, 'message': f'Successfully saved all daily VIX candles since 1990', 'count': len(vix_data)}
     
+    def get_xsp_candle_data(self, last_week_only: bool = False):
+        """
+        Load XSP daily data back to 2017-01-01 or just back 1 week if last_week_only is True.
+        Uses yfinance.
+        
+        Args:
+            last_week_only: If True, only load data from the last week using yfinance.
+        Returns:
+            Results of the operation as a dictionary.
+        """
+        try:
+            import yfinance as yf
+            import pandas as pd
+            from datetime import datetime, timedelta
+            
+            if last_week_only:
+                # For last week only, use yfinance since it's more up-to-date than FRED
+                start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                end = datetime.now().strftime("%Y-%m-%d")
+            else:
+                # For historical data, still use yfinance
+                start = "2017-01-01"
+                end = datetime.now().strftime("%Y-%m-%d")
+                
+            # Load XSP data using yfinance
+            xsp_data = yf.download("^XSP", start=start, end=end, interval="1d")
+            
+            # Handle multi-index columns if present
+            if isinstance(xsp_data.columns, pd.MultiIndex):
+                xsp_data.columns = xsp_data.columns.get_level_values(0)
+            
+            xsp_data = xsp_data.rename(columns={'Close': 'close', 'Open': 'open', 'High': 'high', 'Low': 'low'})
+            
+            # if empty, error
+            if xsp_data.empty:
+                return {'success': False, 'message': 'No data found for XSP'}
+                
+            # Reset index to get timestamp as a column
+            xsp_data.reset_index(inplace=True)
+            
+            # Add 00:00:00 to the date
+            xsp_data['Date'] = pd.to_datetime(xsp_data['Date'].dt.strftime('%Y-%m-%d 00:00:00'))
+            xsp_data = xsp_data.rename(columns={'Date': 'timestamp'})
+            
+            # Add ticker
+            xsp_data['ticker'] = 'XSP'
+            
+            # Ensure volume column exists
+            if 'Volume' in xsp_data.columns:
+                xsp_data.rename(columns={'Volume': 'volume'}, inplace=True)
+            elif 'volume' not in xsp_data.columns:
+                xsp_data['volume'] = 0
+
+        except Exception as e:
+            return {'success': False, 'message': f"Error loading XSP data: {e}"}
+    
+        print(xsp_data)
+    
+        try:
+            # Load data into stocks_dailycandle table
+            with get_session() as session:
+                if last_week_only:
+                    # Delete existing XSP data for the last week
+                    start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                    session.query(DailyCandle).filter_by(ticker='XSP').filter(DailyCandle.timestamp >= start_date).delete()
+                else:
+                    # Delete existing XSP data
+                    session.query(DailyCandle).filter_by(ticker='XSP').delete()
+                
+                # Insert XSP data into the database
+                xsp_data = xsp_data[['ticker', 'timestamp', 'open', 'high', 'low', 'close', 'volume']]
+                
+                session.bulk_insert_mappings(DailyCandle, xsp_data.to_dict(orient='records'))
+                session.commit()
+                
+            return {'success': True, 'message': f'Successfully saved {"weekly" if last_week_only else "all"} daily XSP candles', 'count': len(xsp_data)}
+        except SQLAlchemyError as e:
+            return {'success': False, 'message': f"Database error: {str(e)}"}
+        except Exception as e:
+            return {'success': False, 'message': f"Error saving XSP data: {e}"}
+    
     def get_10_year_treasury_candle_data(self, last_week_only: bool = False):
         """
         Load daily 10-year treasury data using FRED for historical data and yfinance for recent data.

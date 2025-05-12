@@ -124,6 +124,16 @@ def load_candles(
                     "count": 0,
                     "data": None
                 }
+            case "XSP":
+                # Get the XSP data
+                candle_manager.get_xsp_candle_data()
+                
+                return {
+                    "success": True,
+                    "message": "XSP data loaded successfully",
+                    "count": 0,
+                    "data": None
+                }
             case "US10Y":
                 # Get the US10Y data
                 candle_manager.get_10_year_treasury_candle_data(last_week_only=True)

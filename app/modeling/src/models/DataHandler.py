@@ -155,7 +155,16 @@ def calculate_average_true_range(data, n):
     return atr
 
 def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_threshold=1.0075, down_threshold=0.9925, skip_move_status=False, open_override=None):
-    """Get the up/down model data from the database."""
+    """Get the up/down model data from the database.
+    
+    args:
+        start_date (str): The start date for the data retrieval.
+        ticker (str): The ticker symbol for the stock.
+        up_threshold (float): The threshold for upward movement.
+        down_threshold (float): The threshold for downward movement.
+        skip_move_status (bool): Whether to skip the move status calculation.
+        open_override (float): Override the open value for the last row.
+    """
 
     # --- Daily Data ---
     data = get_daily_data_for_ticker(ticker, start_date)
@@ -269,7 +278,13 @@ def get_up_down_percent_model_data(start_date="2018-01-01", ticker="SPY", up_thr
     return data
 
 def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", open_override=None):
-    """Get the up/down model data from the database."""
+    """Get the up/down model data from the database.
+    
+    args:
+        start_date (str): The start date for the data retrieval.
+        ticker (str): The ticker symbol for the stock.
+        open_override (float): Override the open value for the last row.
+    """
     
     data = get_daily_data_for_ticker(ticker, start_date)
     data_5min = get_five_min_data_for_ticker(ticker, start_date)
@@ -324,11 +339,19 @@ def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", open_over
     data = data.drop(columns=["volume"])
     
     # Calculate % change from previous close to open (pm % change)
+    last_idx = data.index[-1]
+    second_last_idx = data.index[-2]
     if open_override is not None:
-        last_idx = data.index[-1]
         data.at[last_idx, 'open'] = open_override if not data.at[last_idx, 'open'] else data.at[last_idx, 'open']
+        
+    if pd.isna(data.at[last_idx, 'vix_open']):
+        data.at[last_idx, 'vix_open'] = data.at[second_last_idx, 'vix_close']
+    if pd.isna(data.at[last_idx, 'us10y_open']):
+        data.at[last_idx, 'us10y_open'] = data.at[second_last_idx, 'us10y_close']
     
     data['premarket_pct_change'] = (data['open'] - data['close'].shift(1)) / data['close'].shift(1) * 100
+    
+    print(data.tail())
     
     # Clean
     data = data.dropna(subset=[
@@ -338,8 +361,8 @@ def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", open_over
         '5min_premarket_20ma_slope',
         'bb_position',
         'realized_volatility',
-        'vix_open', 'vix_close',
-        'us10y_open', 'us10y_close',
+        'vix_open',
+        'us10y_open',
         'pm_MA9', 'pm_MA20'
     ])
     

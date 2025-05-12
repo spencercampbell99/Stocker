@@ -42,7 +42,7 @@ def calculate_black_scholes(S, K, T, sigma, r, option_type='call'):
     except:
         return 0.0
 
-def get_option_prices(spy_price, vix_prev_close, us10y_prev_close, direction="call"):
+def get_option_prices(spy_price, vix_prev_close, us10y_prev_close, direction="call", override_T=None):
     """
     Generate option chain with Black-Scholes prices
     
@@ -70,7 +70,7 @@ def get_option_prices(spy_price, vix_prev_close, us10y_prev_close, direction="ca
     
     sigma = vix_prev_close / 100
     r = us10y_prev_close / 100
-    T = 1 / 252  # 1 trading day
+    T = 1 / 252 if override_T is None else override_T
     
     # Generate realistic ITM strikes
     if direction == "call":

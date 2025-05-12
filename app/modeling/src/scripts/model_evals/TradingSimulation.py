@@ -57,13 +57,13 @@ def build_predictions_df_five_up_down_v01(daily_data, model, metadata):
         'actual': daily_data['move_status'],
         'prediction': y_pred_labels,
         "prediction_no_neutral": y_pred_no_neutral_labels,
-        'open': daily_data['open'],
-        'close': daily_data['close'],  # Make sure we have close price from daily data
+        'open': daily_data['option_open_price'],
+        'close': daily_data['option_close_price'],  # Make sure we have close price from daily data
         'vix_close': daily_data['vix_close'],
         'us10y_close': daily_data['us10y_close'],
         'vix_open': daily_data['vix_open'],
         'us10y_open': daily_data['us10y_open'],
-        'four_fifteen_price': daily_data['four_fifteen_price'],
+        'option_close_price': daily_data['option_close_price'],
         'day_low': daily_data['low'],
         'day_high': daily_data['high'],
     })
@@ -87,7 +87,7 @@ def build_predictions_df_straight_up_down_v01(daily_data, model, metadata):
     scaler = metadata['scaler']
     
     # Actual
-    daily_data['actual'] = np.where(daily_data['four_fifteen_price'] > daily_data['open'], "UP", "DOWN")
+    daily_data['actual'] = np.where(daily_data['option_close_price'] > daily_data['open'], "UP", "DOWN")
     
     # Prepare data and get predictions
     X = daily_data[features]
@@ -106,13 +106,13 @@ def build_predictions_df_straight_up_down_v01(daily_data, model, metadata):
         'actual': daily_data['actual'],
         'prediction': y_pred_labels,
         'prediction_no_neutral': y_pred_labels,  # No neutral prediction for this model
-        'open': daily_data['open'],
-        'close': daily_data['close'],  # Make sure we have close price from daily data
+        'open': daily_data['option_open_price'],
+        'close': daily_data['option_close_price'],  # Make sure we have close price from daily data
         'vix_close': daily_data['vix_close'],
         'us10y_close': daily_data['us10y_close'],
         'vix_open': daily_data['vix_open'],
         'us10y_open': daily_data['us10y_open'],
-        'four_fifteen_price': daily_data['four_fifteen_price'],
+        'option_close_price': daily_data['option_close_price'],
         'day_low': daily_data['low'],
         'day_high': daily_data['high'],
     })
@@ -188,7 +188,7 @@ def simulate_options_trading(model, metadata, daily_data):
         us10y_close = row['us10y_close']
         vix_open = row['vix_open']
         us10y_open = row['us10y_open']
-        four_fifteen_price = row['four_fifteen_price']
+        option_close_price = row['option_close_price']
         market_high = row['day_high']
         market_low = row['day_low']
         
@@ -208,7 +208,8 @@ def simulate_options_trading(model, metadata, daily_data):
             spy_price=market_open,
             vix_prev_close=vix_open,
             us10y_prev_close=us10y_open,
-            direction=option_type
+            direction=option_type,
+            override_T=(1 / 252)
         )
 
         usesetdiff = False
@@ -265,7 +266,7 @@ def simulate_options_trading(model, metadata, daily_data):
             if actual == 0:
                 # Simulate option performance
                 performance_pct = simulate_option_performance(
-                    exit_ticker_price=four_fifteen_price,
+                    exit_ticker_price=option_close_price,
                     entry_premium=premium,
                     strike=strike,
                     us10y=us10y_open,
@@ -276,7 +277,7 @@ def simulate_options_trading(model, metadata, daily_data):
             elif actual == 2:
                 # Simulate option performance
                 performance_pct = simulate_option_performance(
-                    exit_ticker_price=four_fifteen_price,
+                    exit_ticker_price=option_close_price,
                     entry_premium=premium,
                     strike=strike,
                     us10y=us10y_open,
@@ -286,7 +287,7 @@ def simulate_options_trading(model, metadata, daily_data):
                 )
             else:
                 performance_pct = simulate_option_performance(
-                    exit_ticker_price=four_fifteen_price,
+                    exit_ticker_price=option_close_price,
                     entry_premium=premium,
                     strike=strike,
                     us10y=us10y_open,
@@ -317,7 +318,7 @@ def simulate_options_trading(model, metadata, daily_data):
         # Calculate position and update balance
         position_size = get_position_size(balance, premium)
         
-        if balance < 5000 and performance_pct < 0:
+        if balance < 5000 and performance_pct < -0.25:
             # Simulate 25% stop loss intead of full loss
             performance_pct = -0.25
         
@@ -337,7 +338,7 @@ def simulate_options_trading(model, metadata, daily_data):
             'us10y_close': us10y_close,
             'premium': premium,
             'entry_price': market_open,
-            'rough_exit_price': four_fifteen_price,
+            'rough_exit_price': option_close_price,
             'close_price': market_close,
             'position_size': position_size,
             'performance_pct': performance_pct * 100,

@@ -30,6 +30,41 @@ TICKER = "SPY"
 MODEL_VERSION = "TfStraightUpDownModel_v0.1"
 # MODEL_VERSION = "TfUpDownModel_v0.1"
 
+def get_xsp_open_close_data(start_date=START_DATE):
+    """
+    Fetch XSP open and close data from the database
+    
+    Args:
+        start_date: Start date for the data
+        
+    Returns:
+        DataFrame with XSP open and close data
+    """
+    db = get_session()
+    query = text(f"""
+        SELECT
+            "timestamp"::date as date,
+            open,
+            close
+        FROM
+            stocks_dailycandle
+        WHERE
+            ticker = 'XSP'
+            AND "timestamp" >= '{start_date}'
+    """)
+    
+    xsp_data = db.execute(query).fetchall()
+    db.close()
+    
+    # convert to DataFrame
+    xsp_data = pd.DataFrame(xsp_data, columns=['date', 'option_open_price', 'option_close_price'])
+    
+    # index by date
+    xsp_data['date'] = pd.to_datetime(xsp_data['date'])
+    xsp_data.set_index('date', inplace=True)
+    
+    return xsp_data
+
 def get_market_data_straight_model(start_date=START_DATE, ticker=TICKER):
     """
     Fetch and merge all required market data for the straight model
@@ -55,29 +90,10 @@ def get_market_data_straight_model(start_date=START_DATE, ticker=TICKER):
         ticker=ticker,
     )
 
-    # Get open price for 4:15 every day
-    db = get_session()
-    query = text(f"""
-        SELECT
-            "timestamp"::date as date,
-            close
-        FROM
-            stocks_fivemincandle
-        WHERE
-            ticker = '{ticker}'
-            AND "timestamp" >= '{start_date}'
-            AND "timestamp"::time = '16:10:00'
-    """)
+    # Get close price for XSP each day
+    xsp_data = get_xsp_open_close_data(start_date=start_date)
     
-    four_fifteen_close_data = db.execute(query).fetchall()
-    db.close()
-    
-    # convert to DataFrame and concat
-    four_fifteen_close_data = pd.DataFrame(four_fifteen_close_data, columns=['date', 'four_fifteen_price'])
-    four_fifteen_close_data['date'] = pd.to_datetime(four_fifteen_close_data['date'])
-    four_fifteen_close_data.set_index('date', inplace=True)
-    
-    data = pd.concat([data, four_fifteen_close_data], axis=1)
+    data = pd.concat([data, xsp_data], axis=1)
     
     # make sure all data columns are float
     for col in data.columns:
@@ -169,27 +185,9 @@ def get_market_data(start_date=START_DATE, ticker=TICKER, up_threshold=1.005, do
     data = pd.merge(data, macro_data, left_index=True, right_index=True, how='left')
     
     # Get open price for 4:15 every day
-    query = text(f"""
-        SELECT
-            "timestamp"::date as date,
-            close
-        FROM
-            stocks_fivemincandle
-        WHERE
-            ticker = '{ticker}'
-            AND "timestamp" >= '{start_date}'
-            AND "timestamp"::time = '16:10:00'
-    """)
+    xsp_data = get_xsp_open_close_data(start_date=start_date)
     
-    four_fifteen_close_data = db.execute(query).fetchall()
-    db.close()
-    
-    # convert to DataFrame and concat
-    four_fifteen_close_data = pd.DataFrame(four_fifteen_close_data, columns=['date', 'four_fifteen_price'])
-    four_fifteen_close_data['date'] = pd.to_datetime(four_fifteen_close_data['date'])
-    four_fifteen_close_data.set_index('date', inplace=True)
-    
-    data = pd.concat([data, four_fifteen_close_data], axis=1)
+    data = pd.concat([data, xsp_data], axis=1)
     
     # make sure all data columns are float
     for col in data.columns:

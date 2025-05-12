@@ -66,6 +66,20 @@ class SymbolDataManager:
             'sector': 'Bonds',
             'is_active': True,
         }
+        
+    def _load_xsp_ticker(self):
+        """
+        Load XSP ticker information manually as it is not available in Alpaca API.
+        
+        Returns:
+            dict: Dictionary containing XSP symbol information
+        """
+        return {
+            'symbol': 'XSP',
+            'name': 'S&P 500 Index Mini',
+            'sector': 'Equity',
+            'is_active': True,
+        }
     
     def get_symbol_info(self, ticker):
         """
@@ -85,6 +99,9 @@ class SymbolDataManager:
             elif ticker.upper() == 'US10Y':
                 # Load US 10Y ticker information manually
                 return self._load_us_10y_ticker()
+            elif ticker.upper() == 'XSP':
+                # Load XSP ticker information manually
+                return self._load_xsp_ticker()
             
             # Get asset information
             search_params = GetAssetsRequest(status=AssetStatus.ACTIVE)

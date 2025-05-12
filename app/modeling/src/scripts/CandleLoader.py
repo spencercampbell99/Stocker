@@ -99,6 +99,8 @@ def load_candles(ticker, timeframe, start_date, end_date, start_time=None, end_t
         result = candle_manager.get_vix_candle_data()
     elif ticker == 'US10Y':
         result = candle_manager.get_10_year_treasury_candle_data()
+    elif ticker == 'XSP':
+        result = candle_manager.get_xsp_candle_data()
     else:
         candle_data = candle_manager.get_candle_data(
             ticker=ticker,
