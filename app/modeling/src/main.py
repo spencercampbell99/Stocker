@@ -321,7 +321,7 @@ def predict_market(
             date = datetime.now().strftime('%Y-%m-%d')
         
         # Make prediction
-        pred_class, probabilities, features_used = make_prediction(model, model_features, metadata)
+        pred_class, up_probability, features_used = make_prediction(model, model_features, metadata)
         
         # Map prediction class to label
         prediction_map = {0: "DOWN", 1: "FLAT/NEUTRAL", 2: "UP"}
@@ -342,9 +342,7 @@ def predict_market(
             "prediction": prediction,
             "prediction_class": int(pred_class),
             "probabilities": {
-                "down": float(probabilities[0]),
-                "flat": float(probabilities[1]),
-                "up": float(probabilities[2])
+                "up": float(up_probability)
             },
             "option_trade": option_trade,
             "message": "Prediction successful"
