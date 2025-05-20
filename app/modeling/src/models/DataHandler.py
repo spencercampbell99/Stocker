@@ -2,6 +2,7 @@ from db.database import get_session, DailyCandle
 import pandas as pd
 from models.SqlQueries import get_daily_move_status_query, five_min_data_for_ticker_query
 import numpy as np
+import datetime
 
 db = get_session()
 
@@ -25,9 +26,13 @@ def get_five_min_data_for_ticker(ticker, start_date):
         start_date=start_date, 
         start_time='04:00', 
         end_time='09:29'
-    )
+    )    
     data_5min = pd.read_sql(five_min_query, db.connection())
     data_5min = data_5min.set_index("timestamp")
+    
+    # make sure index is datetime
+    data_5min.index = pd.to_datetime(data_5min.index)
+    
     data_5min["date"] = data_5min.index.date
     return data_5min
 
@@ -334,24 +339,31 @@ def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", open_over
     data['bb_position'] = calculate_bollinger_band_position_vectorized(data['close'], n=20, clip_values=False)
     data['realized_volatility'] = calculate_realized_volatility_vectorized(data['close'], n=5)
 
+    # Add today's data if missing
+    # Get today's date
+    today = datetime.date.today()
+
+    # Check if the last index in data is not today
+    if str(data.index[-1]) != str(today):
+        # Get yesterday's data
+        yesterday_data = data.iloc[-1].copy()
+        
+        # Set the open to be yesterday's close
+        yesterday_data['open'] = yesterday_data['close'] if open_override is None else open_override
+        yesterday_data['vix_open'] = yesterday_data['vix_close']
+        yesterday_data['us10y_open'] = yesterday_data['us10y_close']
+        
+        # Add the new row with today's date
+        data.loc[pd.Timestamp(today).date()] = yesterday_data
+        
+        # Sort index to ensure chronological order
+        data = data.sort_index()
+
     # Join data
     data = data.merge(data_5min[['5min_premarket_9ma_slope', '5min_premarket_20ma_slope', 'pm_MA9', 'pm_MA20']], on='date', how='left')
     data = data.drop(columns=["volume"])
     
-    # Calculate % change from previous close to open (pm % change)
-    last_idx = data.index[-1]
-    second_last_idx = data.index[-2]
-    if open_override is not None:
-        data.at[last_idx, 'open'] = open_override if not data.at[last_idx, 'open'] else data.at[last_idx, 'open']
-        
-    if pd.isna(data.at[last_idx, 'vix_open']):
-        data.at[last_idx, 'vix_open'] = data.at[second_last_idx, 'vix_close']
-    if pd.isna(data.at[last_idx, 'us10y_open']):
-        data.at[last_idx, 'us10y_open'] = data.at[second_last_idx, 'us10y_close']
-    
     data['premarket_pct_change'] = (data['open'] - data['close'].shift(1)) / data['close'].shift(1) * 100
-    
-    print(data.tail())
     
     # Clean
     data = data.dropna(subset=[

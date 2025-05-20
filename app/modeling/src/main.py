@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import uvicorn
 import json
+import math
 
 # Import required modules
 from data.CandleData import CandleDataManager
@@ -74,8 +75,10 @@ class PredictionResponse(BaseModel):
     date: str
     prediction: str
     prediction_class: int
-    probabilities: Dict[str, float]
+    probabilities: Dict[str, str]
     option_trade: Optional[Dict[str, Any]] = None
+    alternative_option: Optional[str] = None
+    strength: Optional[str] = None
     message: str = ""
 
 @app.get("/")
@@ -316,15 +319,25 @@ def predict_market(
     Get market prediction and suggested option trade based on 
     current SPY price, VIX, and US10Y values.
     """
-    from scripts.model_runs.RunStraightUpDownModelv01 import load_model_and_metadata, prepare_model_features, make_prediction, select_option_trade
+    from scripts.model_runs.RunStraightUpDownModelv01 import load_model_and_metadata, prepare_model_features, make_prediction, select_option_trade, get_latest_market_data, get_latest_values
     try:
         # Load model and metadata
         model, metadata = load_model_and_metadata()
         
         date = request.date if request.date else None
         
+        # if date is provided and is not today, reset all vix, spy, and us10y values to None
+        if date and date != datetime.now().strftime('%Y-%m-%d'):
+            spy_price = None
+            vix_value = None
+            us10y_value = None
+        else:
+            spy_price = request.spy_price
+            vix_value = request.vix_value
+            us10y_value = request.us10y_value
+        
         # Prepare features for the model
-        model_features = prepare_model_features(metadata, override_date=date, open_override=request.spy_price)
+        model_features = prepare_model_features(metadata, override_date=date, open_override=spy_price)
         
         if not date:
             # If no date is provided, use the current date
@@ -333,6 +346,9 @@ def predict_market(
         # Make prediction
         pred_class, up_probability, features_used = make_prediction(model, model_features, metadata)
         
+        if spy_price is None or vix_value is None or us10y_value is None:
+            spy_price, vix_value, us10y_value = get_latest_values(at_date=date)
+        
         # Map prediction class to label
         prediction_map = {0: "DOWN", 1: "FLAT/NEUTRAL", 2: "UP"}
         prediction = prediction_map[pred_class]
@@ -340,11 +356,17 @@ def predict_market(
         # Get option trade suggestion
         option_trade = select_option_trade(
             prediction=pred_class,
-            spy_price=request.spy_price,
-            vix_value=request.vix_value,
-            us10y_value=request.us10y_value,
+            spy_price=spy_price,
+            vix_value=vix_value,
+            us10y_value=us10y_value,
             max_affordability=request.max_affordability if request.max_affordability else None,
         )
+        seven_itm = math.floor(spy_price - 7) if prediction == "UP" else math.ceil(spy_price + 7)
+        
+        strong_pred_str = "Prediction is considered strong, so this is a safe move on a > $5000 account"
+        weak_pred_str = "Prediction is considered weak, so this is a risky move on a > $5000 account"
+        
+        strong_prediction = strong_pred_str if up_probability > 0.55 and pred_class == 2 else strong_pred_str if up_probability < 0.45 and pred_class == 0 else weak_pred_str
         
         return {
             "success": True,
@@ -352,9 +374,11 @@ def predict_market(
             "prediction": prediction,
             "prediction_class": int(pred_class),
             "probabilities": {
-                "up": float(up_probability)
+                "up": f"{round(float(up_probability) * 100, 2)}%"
             },
             "option_trade": option_trade,
+            "alternative_option": f"Backtesting has also done well on $7 ITM options so consider strike price ${seven_itm}",
+            "strength": strong_prediction,
             "message": "Prediction successful"
         }
         
