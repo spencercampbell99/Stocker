@@ -75,10 +75,10 @@ def get_option_prices(spy_price, vix_prev_close, us10y_prev_close, direction="ca
     # Generate realistic ITM strikes
     if direction == "call":
         base_strike = np.floor(spy_price / STRIKE_STEP) * STRIKE_STEP
-        strikes = [round(base_strike - i*STRIKE_STEP, 2) for i in range(0, 20)]
+        strikes = [round(base_strike - i*STRIKE_STEP, 2) for i in range(-20, 23)]
     else:
         base_strike = np.ceil(spy_price / STRIKE_STEP) * STRIKE_STEP
-        strikes = [round(base_strike + i*STRIKE_STEP, 2) for i in range(0, 20)]
+        strikes = [round(base_strike + i*STRIKE_STEP, 2) for i in range(-20, 23)]
     
     options = {}
     for strike in strikes:

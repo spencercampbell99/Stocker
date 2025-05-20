@@ -55,6 +55,7 @@ def build_predictions_df_five_up_down_v01(daily_data, model, metadata):
     predictions_df = pd.DataFrame({
         'date': daily_data.index,
         'actual': daily_data['move_status'],
+        'probability': y_pred_proba,
         'prediction': y_pred_labels,
         "prediction_no_neutral": y_pred_no_neutral_labels,
         'open': daily_data['option_open_price'],
@@ -104,6 +105,7 @@ def build_predictions_df_straight_up_down_v01(daily_data, model, metadata):
     predictions_df = pd.DataFrame({
         'date': daily_data.index,
         'actual': daily_data['actual'],
+        'probability': y_pred_proba,
         'prediction': y_pred_labels,
         'prediction_no_neutral': y_pred_labels,  # No neutral prediction for this model
         'open': daily_data['option_open_price'],
@@ -174,12 +176,20 @@ def simulate_options_trading(model, metadata, daily_data):
         date = row['date']
         prediction = row['prediction']
         actual = row['actual']
+        probability = row['probability']
 
         # Skip neutral predictions
         if prediction == 'NEUTRAL':
             neutral_count += 1
             prediction = row['prediction_no_neutral']
             # continue
+        
+        if prediction == 'UP':
+            if probability < 0.55 and balance < 5000:
+                continue
+        else:
+            if probability > 0.45 and balance < 5000:
+                continue
             
         # Get market prices
         market_open = row['open']
@@ -227,12 +237,28 @@ def simulate_options_trading(model, metadata, daily_data):
             else:
                 reason = "$5 strike price diff"
         else:
-            strike, premium, reason = select_best_option(
-                option_chain,
-                market_open,
-                option_type,
-                max_affordability=balance / 100 # Balance divided by 100 to account for 100x for premium costs
-            )
+            # strike, premium, reason = select_best_option(
+            #     option_chain,
+            #     market_open,
+            #     option_type,
+            #     max_affordability=balance / 100 # Balance divided by 100 to account for 100x for premium costs
+            # )
+            
+            diff = 6
+            
+            # pick strike $2 otm
+            strike = round(market_open - diff) if option_type == "call" else round(market_open + diff)
+            premium = option_chain.get(strike, None)
+            if premium is None:
+                # Select best option
+                strike, premium, reason = select_best_option(
+                    option_chain,
+                    market_open,
+                    option_type,
+                    max_affordability=balance / 100 # Balance divided by 100 to account for 100x for premium costs
+                )
+            else:
+                reason = "$${diff} strike price diff"
         
         if strike is None:
             continue  # Skip if no valid option found
@@ -318,9 +344,9 @@ def simulate_options_trading(model, metadata, daily_data):
         # Calculate position and update balance
         position_size = get_position_size(balance, premium)
         
-        if balance < 5000 and performance_pct < -0.25:
-            # Simulate 25% stop loss intead of full loss
-            performance_pct = -0.25
+        # if balance < 5000 and performance_pct < -0.25:
+        #     # Simulate 25% stop loss intead of full loss
+        #     performance_pct = -0.25
         
         dollar_return = position_size * performance_pct
         new_balance = balance + dollar_return
@@ -330,6 +356,7 @@ def simulate_options_trading(model, metadata, daily_data):
             'date': date,
             'entry_time': entry_time,
             'exit_time': "15:30:00",
+            'probability': probability,
             'prediction': prediction,
             'actual': actual,
             'option_type': option_type,
@@ -489,6 +516,7 @@ def save_options_trading_results_to_table(trading_results, table_name="options_t
         date DATE,
         entry_time TIMESTAMP,
         exit_time TIME,
+        probability FLOAT,
         prediction VARCHAR(10),
         actual VARCHAR(10),
         option_type VARCHAR(5),
