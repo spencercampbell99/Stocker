@@ -358,6 +358,16 @@ def get_percent_move_model_data(start_date="2018-01-01", ticker="SPY", open_over
         
         # Sort index to ensure chronological order
         data = data.sort_index()
+    else:
+        last_index_data = data.iloc[-1]
+        second_last_index_data = data.iloc[-2]
+        
+        last_index_data['open'] = second_last_index_data['close'] if (last_index_data['open'] is None or pd.isna(last_index_data['open'])) and open_override is None else open_override
+        last_index_data['vix_open'] = second_last_index_data['vix_close'] if (last_index_data['vix_open'] is None or pd.isna(last_index_data['vix_open'])) else last_index_data['vix_open']
+        last_index_data['us10y_open'] = second_last_index_data['us10y_close'] if (last_index_data['us10y_open'] is None or pd.isna(last_index_data['us10y_open'])) else last_index_data['us10y_open']
+        
+        data.iloc[-1] = last_index_data
+        data = data.sort_index()
 
     # Join data
     data = data.merge(data_5min[['5min_premarket_9ma_slope', '5min_premarket_20ma_slope', 'pm_MA9', 'pm_MA20']], on='date', how='left')

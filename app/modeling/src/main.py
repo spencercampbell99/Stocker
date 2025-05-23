@@ -361,7 +361,7 @@ def predict_market(
             us10y_value=us10y_value,
             max_affordability=request.max_affordability if request.max_affordability else None,
         )
-        seven_itm = math.floor(spy_price - 7) if prediction == "UP" else math.ceil(spy_price + 7)
+        six_itm = math.floor(spy_price - 6) if prediction == "UP" else math.ceil(spy_price + 6)
         
         strong_pred_str = "Prediction is considered strong, so this is a safe move on a > $5000 account"
         weak_pred_str = "Prediction is considered weak, so this is a risky move on a > $5000 account"
@@ -377,19 +377,22 @@ def predict_market(
                 "up": f"{round(float(up_probability) * 100, 2)}%"
             },
             "option_trade": option_trade,
-            "alternative_option": f"Backtesting has also done well on $7 ITM options so consider strike price ${seven_itm}",
+            "alternative_option": f"Backtesting has also done well on $6 ITM options so consider strike price ${six_itm}",
             "strength": strong_prediction,
             "message": "Prediction successful"
         }
         
     except Exception as e:
+        print(e)
         return {
             "success": False,
             "date": "",
             "prediction": "ERROR",
             "prediction_class": -1,
-            "probabilities": {"down": 0.0, "flat": 0.0, "up": 0.0},
+            "probabilities": {"up": 0.0},
             "option_trade": None,
+            "alternative_option": None,
+            "strength": None,
             "message": f"Error making prediction: {str(e)}"
         }
 

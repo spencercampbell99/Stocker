@@ -258,7 +258,7 @@ def simulate_options_trading(model, metadata, daily_data):
                     max_affordability=balance / 100 # Balance divided by 100 to account for 100x for premium costs
                 )
             else:
-                reason = "$${diff} strike price diff"
+                reason = f"${diff} strike price diff"
         
         if strike is None:
             continue  # Skip if no valid option found
@@ -322,27 +322,44 @@ def simulate_options_trading(model, metadata, daily_data):
                     expir_time_override = 0
                 )
         
-        def get_position_size(balance, premium):
+        def get_position_size(balance, premium, confidence=None):
             """
             Calculate position size based on balance and premium selected.
             
             Take greater value between 25% of balance and premium.
             If 25% is greater, reduce down to premium * 100 where less than 25% of balance.
+            Risk is scaled linearly from 10% at 0.55 confidence to 40% at 0.9 confidence.
             
             Args:
                 balance: Current account balance
                 premium: Option premium selected
+                confidence: Model confidence (probability)
             """
-            max_safe_bet = balance * 0.25
+            if confidence is None:
+                scaled_percent_risk = 0.25
+            else:
+                # Linear scale: 0.55 -> 0.10, 0.90 -> 0.25
+                min_conf, max_conf = 0.55, 0.90
+                min_risk, max_risk = 0.10, 0.25
+                if confidence <= min_conf:
+                    scaled_percent_risk = min_risk
+                elif confidence >= max_conf:
+                    scaled_percent_risk = max_risk
+                else:
+                    # Linear interpolation
+                    scaled_percent_risk = min_risk + (confidence - min_conf) * (max_risk - min_risk) / (max_conf - min_conf)
+
+            max_safe_bet = balance * scaled_percent_risk
             premium_cost = premium * 100  # Cost of one contract (100 shares)
-            
+
             if premium_cost > max_safe_bet:
                 return premium_cost
             else:
                 return np.floor(max_safe_bet / premium_cost) * premium_cost
         
         # Calculate position and update balance
-        position_size = get_position_size(balance, premium)
+        confidence=probability if prediction == 'UP' else 1 - probability # for use if you want scaled risk based on confidence
+        position_size = get_position_size(balance, premium, confidence=None)
         
         # if balance < 5000 and performance_pct < -0.25:
         #     # Simulate 25% stop loss intead of full loss
@@ -403,48 +420,72 @@ def simulate_options_trading(model, metadata, daily_data):
 def plot_options_trading_results(trading_results, save_path=None):
     """
     Plot the options trading simulation results
-    
+
     Args:
         trading_results: Dictionary containing trading simulation results
         save_path: Path to save the plot (optional)
     """
+    import matplotlib.dates as mdates
+
     balances = trading_results['balances']
     trades = trading_results['trades']
-    
+    trade_dates = trading_results.get('trade_dates', [trade['date'] for trade in trades])
+
+    # Convert trade_dates to pandas datetime if not already
+    trade_dates = pd.to_datetime(trade_dates)
+
+    # Ensure balances and trade_dates are the same length
+    if len(balances) == len(trade_dates) + 1:
+        # Insert the first date at the beginning to match balances
+        if hasattr(trade_dates, "iloc"):
+            first_date = trade_dates.iloc[0]
+        else:
+            first_date = trade_dates[0]
+        trade_dates = pd.concat([pd.Series([first_date]), pd.Series(trade_dates)], ignore_index=True)
+
     # Create figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), gridspec_kw={'height_ratios': [3, 1]})
-    
-    # Plot balance over time
-    ax1.plot(range(len(balances)), balances, 'b-', linewidth=2)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1]})
+
+    # Plot balance over time with dates on x-axis
+    ax1.plot(trade_dates, balances, 'b-', linewidth=2)
     ax1.set_title('Options Trading Performance Simulation', fontsize=16)
     ax1.set_ylabel('Account Balance ($)', fontsize=12)
-    ax1.set_xlim(0, len(balances)-1)
+    ax1.set_xlim(trade_dates.min(), trade_dates.max())
     ax1.grid(True)
-    
+
+    # Format x-axis as dates
+    ax1.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    fig.autofmt_xdate(rotation=30)
+
     # Annotate start and end balance
-    ax1.annotate(f"Start: ${trading_results['initial_balance']:.2f}", 
-                xy=(0, trading_results['initial_balance']),
+    ax1.annotate(f"Start: ${trading_results['initial_balance']:.2f}",
+                xy=(trade_dates.iloc[0], trading_results['initial_balance']),
                 xytext=(10, 10), textcoords='offset points',
                 fontsize=10, color='green')
-    
-    ax1.annotate(f"End: ${trading_results['final_balance']:.2f}", 
-                xy=(len(balances)-1, trading_results['final_balance']),
+
+    ax1.annotate(f"End: ${trading_results['final_balance']:.2f}",
+                xy=(trade_dates.iloc[-1], trading_results['final_balance']),
                 xytext=(10, 10), textcoords='offset points',
                 fontsize=10, color='blue')
-    
+
     # Add horizontal line at initial balance
     ax1.axhline(y=trading_results['initial_balance'], color='r', linestyle='--', alpha=0.5)
-    
-    # Plot individual trade results
+
+    # Plot individual trade results with dates on x-axis
     pnl_values = [trade['pnl_dollar'] for trade in trades]
     colors = ['green' if pnl >= 0 else 'red' for pnl in pnl_values]
-    
-    ax2.bar(range(len(pnl_values)), pnl_values, color=colors, width=0.8)
-    ax2.set_xlabel('Trade Number', fontsize=12)
+    trade_dates_for_trades = pd.to_datetime([trade['date'] for trade in trades])
+
+    ax2.bar(trade_dates_for_trades, pnl_values, color=colors, width=1)
+    ax2.set_xlabel('Trade Date', fontsize=12)
     ax2.set_ylabel('Trade P&L ($)', fontsize=12)
-    ax2.set_xlim(-0.5, len(trades)-0.5)
+    ax2.set_xlim(trade_dates.min(), trade_dates.max())
     ax2.grid(True, axis='y')
-    
+    ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    fig.autofmt_xdate(rotation=30)
+
     # Add overall stats to the plot
     stats_text = (
         f"Total Return: {trading_results['total_return']:.2f}%\n"
@@ -453,16 +494,16 @@ def plot_options_trading_results(trading_results, save_path=None):
         f"Wins: {trading_results['win_count']}\n"
         f"Losses: {trading_results['loss_count']}"
     )
-    
+
     # Position the text box in figure coords
-    plt.figtext(0.15, 0.01, stats_text, fontsize=12, 
+    plt.figtext(0.15, 0.01, stats_text, fontsize=12,
                 bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
-    
+
     plt.tight_layout(rect=[0, 0.05, 1, 0.95])
-    
+
     if save_path:
         plt.savefig(save_path)
-    
+
     plt.show()
 
 def display_options_trading_results(trading_results):

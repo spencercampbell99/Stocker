@@ -25,7 +25,7 @@ from scripts.model_evals.TradingSimulation import (
 sys.path.append(str(Path(__file__).parents[3]))
 
 # Constants
-START_DATE = "2022-06-01"
+START_DATE = "2025-01-01"
 TICKER = "SPY"
 MODEL_VERSION = "TfStraightUpDownModel_v0.1"
 # MODEL_VERSION = "TfUpDownModel_v0.1"
